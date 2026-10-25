@@ -13,6 +13,8 @@ import {
   Database,
   Shield,
   LifeBuoy,
+  Copy,
+  Check,
 } from "lucide-react";
 
 export function AuthGate({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -22,6 +24,19 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
   const [showHelp, setShowHelp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState(false);
+
+  async function handleCopyCmd() {
+    const cmd =
+      "pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local";
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2000);
+    } catch {
+      // Ignore clipboard write errors in restricted contexts
+    }
+  }
 
   if (status === "loading") {
     return (
@@ -62,9 +77,9 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
           <div className="w-12 h-12 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center shadow-md mb-3">
             <KeyRound className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Redirect Platform</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Redirect</h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Enter your API Bearer Token to access the dashboard
+            Enter your token to access the dashboard
           </p>
         </div>
 
@@ -90,7 +105,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
                 htmlFor="api-token-input"
                 className="block text-xs font-semibold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 mb-1.5"
               >
-                API Bearer Token
+                Token
               </label>
               <div className="relative">
                 <input
@@ -151,7 +166,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
               <div className="mt-4 space-y-3.5 text-sm text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 animate-in fade-in duration-150">
                 <div className="flex gap-2.5">
                   <Shield className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">1. Worker Secret (API_KEY)</p>
                     <p className="text-xs mt-0.5">
                       If you set the <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">API_KEY</code> secret in Cloudflare Dashboard (Settings &gt; Variables and Secrets), that value grants admin access.
@@ -161,7 +176,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
 
                 <div className="flex gap-2.5">
                   <Database className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">2. Production Cloudflare KV</p>
                     <p className="text-xs mt-0.5">
                       In Cloudflare Dashboard &gt; Storage &amp; Databases &gt; KV &gt; <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">AUTH_TOKENS</code>, check the key <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">initial_token</code> (or any <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">token:*</code> key) to view its plaintext value.
@@ -171,20 +186,35 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
 
                 <div className="flex gap-2.5">
                   <Terminal className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">3. Local Dev / CLI</p>
                     <p className="text-xs mt-0.5">
                       In local development or via Wrangler CLI:
                     </p>
-                    <pre className="mt-1.5 p-2 bg-zinc-200 dark:bg-zinc-900 rounded font-mono text-xs overflow-x-auto text-zinc-800 dark:text-zinc-300">
-                      pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
-                    </pre>
+                    <div className="relative group mt-1.5">
+                      <pre className="p-2.5 pr-8 bg-zinc-200/80 dark:bg-zinc-900 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all text-zinc-800 dark:text-zinc-300 border border-zinc-300/60 dark:border-zinc-800">
+                        pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={handleCopyCmd}
+                        className="absolute top-2 right-2 p-1 rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 transition-colors"
+                        title={copiedCmd ? "Copied!" : "Copy command"}
+                        aria-label="Copy command"
+                      >
+                        {copiedCmd ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex gap-2.5">
                   <LifeBuoy className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">4. Emergency Recovery</p>
                     <p className="text-xs mt-0.5">
                       If locked out, run <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">wrangler secret put API_KEY</code> to set a master fallback token.

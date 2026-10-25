@@ -57,7 +57,7 @@ export class ApiClientError extends Error {
 
 export class AccessSessionExpiredError extends Error {
   constructor(
-    message = "Cloudflare Zero Trust session has expired. Please reload to log in."
+    message = "Your session may have expired or the server is unreachable. Please reload the page to reconnect."
   ) {
     super(message);
     this.name = "AccessSessionExpiredError";

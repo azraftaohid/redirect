@@ -74,6 +74,8 @@ describe("AuthGate & AccessExpiredBanner", () => {
     // Initial loading or unauthenticated form
     const input = await screen.findByPlaceholderText(/paste your token here/i);
     expect(input).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Redirect" })).toBeInTheDocument();
+    expect(screen.getByText(/enter your token to access the dashboard/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /unlock dashboard/i })).toBeInTheDocument();
     expect(screen.queryByText("Protected Content")).not.toBeInTheDocument();
   });
@@ -87,7 +89,7 @@ describe("AuthGate & AccessExpiredBanner", () => {
 
     // Initially banner should not be in DOM
     expect(
-      screen.queryByText(/your cloudflare zero trust session has expired/i)
+      screen.queryByText(/session may have expired or the server is unreachable/i)
     ).not.toBeInTheDocument();
 
     // Trigger access expired event
@@ -96,7 +98,7 @@ describe("AuthGate & AccessExpiredBanner", () => {
     });
 
     // Banner should appear
-    const msg = await screen.findByText(/your cloudflare zero trust session has expired/i);
+    const msg = await screen.findByText(/session may have expired or the server is unreachable/i);
     expect(msg).toBeInTheDocument();
 
     // Reload button should be present
@@ -106,7 +108,38 @@ describe("AuthGate & AccessExpiredBanner", () => {
     const dismissBtn = screen.getByRole("button", { name: /dismiss banner/i });
     fireEvent.click(dismissBtn);
     expect(
-      screen.queryByText(/your cloudflare zero trust session has expired/i)
+      screen.queryByText(/session may have expired or the server is unreachable/i)
     ).not.toBeInTheDocument();
+  });
+
+  it("toggles 'Where do I find my token?' help section and renders local dev CLI command", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: new Headers(),
+    } as any);
+
+    render(
+      <AuthProvider>
+        <AuthGate>
+          <div>Protected Content</div>
+        </AuthGate>
+      </AuthProvider>
+    );
+
+    const helpBtn = await screen.findByRole("button", { name: /where do i find my token/i });
+    expect(screen.queryByText(/local dev \/ cli/i)).not.toBeInTheDocument();
+
+    // Click to open help
+    fireEvent.click(helpBtn);
+
+    expect(screen.getByText(/3\. Local Dev \/ CLI/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/pnpm --filter @redirect\/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local/i)
+    ).toBeInTheDocument();
+
+    // Copy command button
+    const copyBtn = screen.getByRole("button", { name: /copy command/i });
+    expect(copyBtn).toBeInTheDocument();
   });
 });

@@ -16,8 +16,8 @@ export function AccessExpiredBanner(): React.ReactElement | null {
     <div className="bg-amber-500 text-zinc-950 px-4 py-2.5 text-sm font-medium shadow-md sticky top-0 z-50 transition-all flex items-center justify-between gap-4">
       <div className="flex items-center gap-2.5 min-w-0">
         <AlertCircle className="w-5 h-5 shrink-0" />
-        <span className="truncate">
-          Your Cloudflare Zero Trust session has expired. Reload the page to sign back in with your identity provider.
+        <span className="truncate" title="Your session may have expired or the server is unreachable. Reload the page to reconnect or sign back in.">
+          Your session may have expired or the server is unreachable. Reload the page to reconnect or sign back in.
         </span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
