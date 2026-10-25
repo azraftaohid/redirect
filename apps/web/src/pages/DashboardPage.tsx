@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { LinkRecord, ListLinksQuery } from "@redirect/shared";
 import { listLinks, createLink } from "@/api/client";
 import { LinkRow } from "@/components/LinkRow";
@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function DashboardPage(): React.ReactElement {
   // Parse filters from URL
@@ -33,6 +34,7 @@ export function DashboardPage(): React.ReactElement {
   const initialPage = Number(searchParams.get("page") || 1);
 
   const [search, setSearch] = useState(initialSearch);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
   const [tag, setTag] = useState(initialTag);
   const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
   const [sortBy, setSortBy] = useState<"createdAt" | "updatedAt" | "clickCount" | "slug">(initialSortBy);
@@ -52,6 +54,14 @@ export function DashboardPage(): React.ReactElement {
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingLink, setEditingLink] = useState<LinkRecord | null>(null);
   const [qrModalLink, setQrModalLink] = useState<LinkRecord | null>(null);
+
+  // Debounce search query so server isn't queried on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // Update URL search parameters when filters change
   const updateUrlParams = useCallback(
@@ -83,14 +93,18 @@ export function DashboardPage(): React.ReactElement {
     []
   );
 
+  // Sequence ref to guard against out-of-order race conditions
+  const requestSeq = useRef(0);
+
   // Fetch links
   const fetchLinks = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const query: ListLinksQuery = {
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         tag: tag.trim() || undefined,
         isActive: statusFilter === "active" ? "true" : statusFilter === "inactive" ? "false" : undefined,
         sortBy,
@@ -98,14 +112,18 @@ export function DashboardPage(): React.ReactElement {
       };
 
       const res = await listLinks(query);
+      if (seq !== requestSeq.current) return;
       setLinks(res.data);
       setTotalCount(res.pagination.total);
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       toast.error(err instanceof Error ? err.message : "Failed to load links");
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+      }
     }
-  }, [page, search, tag, statusFilter, sortBy, sortOrder]);
+  }, [page, debouncedSearch, tag, statusFilter, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchLinks();
@@ -114,14 +132,14 @@ export function DashboardPage(): React.ReactElement {
   // Sync state to URL
   useEffect(() => {
     updateUrlParams({
-      search: search.trim(),
+      search: debouncedSearch.trim(),
       tag: tag.trim(),
       status: statusFilter,
       sortBy,
       sortOrder,
       page,
     });
-  }, [search, tag, statusFilter, sortBy, sortOrder, page, updateUrlParams]);
+  }, [debouncedSearch, tag, statusFilter, sortBy, sortOrder, page, updateUrlParams]);
 
   // Quick shorten submit
   async function handleQuickShorten(e: React.FormEvent) {
@@ -246,6 +264,7 @@ export function DashboardPage(): React.ReactElement {
             <button
               onClick={() => {
                 setSearch("");
+                setDebouncedSearch("");
                 setPage(1);
               }}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
@@ -320,16 +339,17 @@ export function DashboardPage(): React.ReactElement {
             </div>
             <h3 className="text-base font-semibold">No links found</h3>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-sm">
-              {search || tag || statusFilter !== "all"
+              {debouncedSearch || tag || statusFilter !== "all"
                 ? "No links matched your current filter criteria. Try clearing your filters."
                 : "You haven't created any short links yet. Shorten your first link above to get started!"}
             </p>
-            {search || tag || statusFilter !== "all" ? (
+            {debouncedSearch || tag || statusFilter !== "all" ? (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
                   setSearch("");
+                  setDebouncedSearch("");
                   setTag("");
                   setStatusFilter("all");
                   setPage(1);
