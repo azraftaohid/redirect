@@ -71,14 +71,14 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
         {/* Card */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 shadow-sm">
           {warning && (
-            <div className="mb-5 flex items-start gap-2.5 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-xs leading-relaxed">
+            <div className="mb-5 flex items-start gap-2.5 p-3.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-sm leading-relaxed">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
               <span>{warning}</span>
             </div>
           )}
 
           {errorMsg && (
-            <div className="mb-5 flex items-start gap-2.5 p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-800 dark:text-red-300 text-xs leading-relaxed">
+            <div className="mb-5 flex items-start gap-2.5 p-3.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-800 dark:text-red-300 text-sm leading-relaxed">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
               <span>{errorMsg}</span>
             </div>
@@ -138,55 +138,55 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
             <button
               type="button"
               onClick={() => setShowHelp(!showHelp)}
-              className="w-full flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
+              className="w-full flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
             >
               <span className="flex items-center gap-1.5 font-medium">
-                <HelpCircle className="w-3.5 h-3.5" />
+                <HelpCircle className="w-4 h-4" />
                 Where do I find my token?
               </span>
-              {showHelp ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              {showHelp ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
 
             {showHelp && (
-              <div className="mt-4 space-y-3 text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-lg border border-zinc-200 dark:border-zinc-800 animate-in fade-in duration-150">
-                <div className="flex gap-2">
+              <div className="mt-4 space-y-3.5 text-sm text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 animate-in fade-in duration-150">
+                <div className="flex gap-2.5">
                   <Shield className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">1. Worker Secret (API_KEY)</p>
-                    <p className="text-[11px] mt-0.5">
+                    <p className="text-xs mt-0.5">
                       If you set the <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">API_KEY</code> secret in Cloudflare Dashboard (Settings &gt; Variables and Secrets), that value grants admin access.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2.5">
                   <Database className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">2. Production Cloudflare KV</p>
-                    <p className="text-[11px] mt-0.5">
+                    <p className="text-xs mt-0.5">
                       In Cloudflare Dashboard &gt; Storage &amp; Databases &gt; KV &gt; <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">AUTH_TOKENS</code>, check the key <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">initial_token</code> (or any <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">token:*</code> key) to view its plaintext value.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2.5">
                   <Terminal className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">3. Local Dev / CLI</p>
-                    <p className="text-[11px] mt-0.5">
+                    <p className="text-xs mt-0.5">
                       In local development or via Wrangler CLI:
                     </p>
-                    <pre className="mt-1 p-1.5 bg-zinc-200 dark:bg-zinc-900 rounded font-mono text-[10px] overflow-x-auto text-zinc-800 dark:text-zinc-300">
+                    <pre className="mt-1.5 p-2 bg-zinc-200 dark:bg-zinc-900 rounded font-mono text-xs overflow-x-auto text-zinc-800 dark:text-zinc-300">
                       pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
                     </pre>
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2.5">
                   <LifeBuoy className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">4. Emergency Recovery</p>
-                    <p className="text-[11px] mt-0.5">
+                    <p className="text-xs mt-0.5">
                       If locked out, run <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">wrangler secret put API_KEY</code> to set a master fallback token.
                     </p>
                   </div>

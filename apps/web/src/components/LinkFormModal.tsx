@@ -266,7 +266,7 @@ export function LinkFormModal({
             {errors.slug && <p className="text-xs text-red-500 font-medium">{errors.slug}</p>}
 
             {isSlugChanged && (
-              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-xs">
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-sm">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
                 <span>
                   Changing this slug will invalidate existing QR codes and external links referencing <code>/{initialLink?.slug}</code>.
@@ -283,7 +283,7 @@ export function LinkFormModal({
               value={statusCode}
               onChange={(e) => setStatusCode(Number(e.target.value) as 301 | 302 | 307 | 308)}
               disabled={submitting}
-              className="w-full h-9 rounded-lg border border-zinc-200 bg-white px-3 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+              className="w-full h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
             >
               <option value={307}>307 Temporary Redirect (Recommended - Preserves HTTP Method)</option>
               <option value={302}>302 Found (Standard Temporary)</option>
@@ -292,7 +292,7 @@ export function LinkFormModal({
             </select>
 
             {isPermanent && (
-              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-800 dark:text-red-300 text-xs">
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-800 dark:text-red-300 text-sm">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
                 <span>
                   Permanent redirects (301 &amp; 308) are aggressively cached by browsers and intermediate proxies. Changing the destination later may not reach visitors whose browsers stored the cache.
@@ -306,7 +306,7 @@ export function LinkFormModal({
             <div className="flex items-center justify-between">
               <div>
                 <Label htmlFor="link-active-switch" className="font-semibold">Link Status</Label>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
                   {isActive ? "Link is active and redirecting visitors." : "Link is inactive and will return 404."}
                 </p>
               </div>
@@ -321,7 +321,7 @@ export function LinkFormModal({
             <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-zinc-800/50">
               <div>
                 <Label htmlFor="link-forward-query-switch" className="font-semibold">Forward Query Parameters</Label>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
                   Pass search parameters (e.g. <code>?utm_source=...</code>) directly to destination URL.
                 </p>
               </div>
@@ -336,7 +336,7 @@ export function LinkFormModal({
 
           {/* Expiration Datetime */}
           <div className="space-y-1.5">
-            <Label htmlFor="link-expires-at" className="text-xs">
+            <Label htmlFor="link-expires-at">
               Expiration Date &amp; Time <span className="text-zinc-400 font-normal">(optional)</span>
             </Label>
             <Input
@@ -345,7 +345,7 @@ export function LinkFormModal({
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
               disabled={submitting}
-              className="text-xs"
+              className="text-sm h-10"
             />
             {errors.expiresAt && <p className="text-xs text-red-500 font-medium">{errors.expiresAt}</p>}
           </div>

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import type { LinkRecord } from "@redirect/shared";
 import { updateLink, deleteLink } from "@/api/client";
 import { isLinkExpired, formatDisplayDate } from "@/utils/dates";
@@ -108,10 +108,22 @@ export function LinkRow({
   }
 
   const expired = isLinkExpired(link.expiresAt);
+  const [, navigate] = useLocation();
+
+  const handleRowClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("button, a, input, [role='switch'], [role='menuitem'], [data-radix-collection-item]")) {
+      return;
+    }
+    navigate(`/links/${link.id}`);
+  };
 
   return (
     <>
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 transition-all hover:border-zinc-300 dark:hover:border-zinc-700 shadow-xs">
+      <div
+        onClick={handleRowClick}
+        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 transition-all hover:border-zinc-300 dark:hover:border-zinc-700 shadow-xs cursor-pointer"
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Left Column: Slug, Title & Destination */}
           <div className="min-w-0 flex-1 space-y-1">
@@ -133,32 +145,32 @@ export function LinkRow({
 
               {/* Status Badges */}
               {expired ? (
-                <Badge variant="destructive" className="text-[10px] py-0 px-1.5">
+                <Badge variant="destructive" className="text-xs py-0.5 px-2">
                   Expired
                 </Badge>
               ) : link.isActive ? (
-                <Badge variant="success" className="text-[10px] py-0 px-1.5">
+                <Badge variant="success" className="text-xs py-0.5 px-2">
                   Active
                 </Badge>
               ) : (
-                <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                <Badge variant="secondary" className="text-xs py-0.5 px-2">
                   Inactive
                 </Badge>
               )}
 
-              <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-mono">
+              <Badge variant="outline" className="text-xs py-0.5 px-2 font-mono">
                 {link.statusCode}
               </Badge>
 
               {link.forwardQuery && (
-                <Badge variant="outline" className="text-[10px] py-0 px-1.5 text-blue-600 border-blue-300 dark:text-blue-400 dark:border-blue-800">
+                <Badge variant="outline" className="text-xs py-0.5 px-2 text-blue-600 border-blue-300 dark:text-blue-400 dark:border-blue-800">
                   +query
                 </Badge>
               )}
             </div>
 
             {/* Target URL & Title */}
-            <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+            <div className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
               {link.title && (
                 <span className="font-medium text-zinc-700 dark:text-zinc-300 mr-1 truncate max-w-xs">
                   {link.title} &bull;
@@ -173,7 +185,7 @@ export function LinkRow({
               >
                 {link.targetUrl}
               </a>
-              <ExternalLink className="w-3 h-3 shrink-0" />
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
             </div>
 
             {/* Tags */}
@@ -182,7 +194,7 @@ export function LinkRow({
                 {link.tags.map((t) => (
                   <span
                     key={t}
-                    className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-[10px] font-medium"
+                    className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-xs font-medium"
                   >
                     #{t}
                   </span>
@@ -192,9 +204,9 @@ export function LinkRow({
 
             {/* Expiration Info */}
             {link.expiresAt && (
-              <div className="flex items-center gap-3 text-[11px] text-zinc-400 pt-0.5">
+              <div className="flex items-center gap-3 text-xs text-zinc-400 pt-0.5">
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+                  <Clock className="w-3.5 h-3.5" />
                   Expires: {formatDisplayDate(link.expiresAt)}
                 </span>
               </div>

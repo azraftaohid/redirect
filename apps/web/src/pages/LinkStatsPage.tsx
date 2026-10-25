@@ -153,7 +153,7 @@ export function LinkStatsPage(): React.ReactElement {
                 <Badge variant="secondary" className="text-xs">Inactive</Badge>
               )}
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            <div className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
               {link.title && <span className="font-medium text-zinc-700 dark:text-zinc-300 mr-1">{link.title} &bull;</span>}
               <a
                 href={link.targetUrl}
@@ -163,7 +163,7 @@ export function LinkStatsPage(): React.ReactElement {
               >
                 {link.targetUrl}
               </a>
-              <ExternalLink className="w-3 h-3 shrink-0" />
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
             </div>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function LinkStatsPage(): React.ReactElement {
             size="sm"
             onClick={() => fetchData(true)}
             disabled={refreshing}
-            className="h-8 gap-1.5 text-xs"
+            className="h-9 gap-1.5 text-sm"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span>Refresh</span>
@@ -184,7 +184,8 @@ export function LinkStatsPage(): React.ReactElement {
             variant="outline"
             size="sm"
             onClick={() => setQrModalOpen(true)}
-            className="h-8 gap-1.5 text-xs"
+            disabled={refreshing}
+            className="h-9 gap-1.5 text-sm"
           >
             <QrCode className="w-3.5 h-3.5" />
             <span>QR Code</span>
@@ -193,7 +194,7 @@ export function LinkStatsPage(): React.ReactElement {
           <Button
             size="sm"
             onClick={() => setFormModalOpen(true)}
-            className="h-8 gap-1.5 text-xs"
+            className="h-9 gap-1.5 text-sm"
           >
             <Edit className="w-3.5 h-3.5" />
             <span>Edit Link</span>
@@ -214,7 +215,7 @@ export function LinkStatsPage(): React.ReactElement {
             <div className="text-2xl font-bold font-mono">
               {link.clickCount.toLocaleString()}
             </div>
-            <p className="text-[11px] text-zinc-400 mt-1">All-time redirects</p>
+            <p className="text-xs text-zinc-400 mt-1">All-time redirects</p>
           </CardContent>
         </Card>
 
@@ -229,7 +230,7 @@ export function LinkStatsPage(): React.ReactElement {
             <div className="text-2xl font-bold font-mono">
               {stats?.totalClicks.toLocaleString() ?? "—"}
             </div>
-            <p className="text-[11px] text-zinc-400 mt-1">Last {days} days</p>
+            <p className="text-xs text-zinc-400 mt-1">Last {days} days</p>
           </CardContent>
         </Card>
 
@@ -244,7 +245,7 @@ export function LinkStatsPage(): React.ReactElement {
             <div className="text-sm font-semibold truncate">
               {formatDisplayDate(link.lastClickedAt)}
             </div>
-            <p className="text-[11px] text-zinc-400 mt-1">
+            <p className="text-xs text-zinc-400 mt-1">
               {link.lastClickedAt ? "Latest visitor" : "No visits yet"}
             </p>
           </CardContent>
@@ -255,7 +256,7 @@ export function LinkStatsPage(): React.ReactElement {
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Configuration
             </CardTitle>
-            <Badge variant="outline" className="font-mono text-[10px] py-0">
+            <Badge variant="outline" className="font-mono text-xs py-0.5 px-2">
               {link.statusCode}
             </Badge>
           </CardHeader>
@@ -263,7 +264,7 @@ export function LinkStatsPage(): React.ReactElement {
             <div className="text-sm font-semibold">
               {link.forwardQuery ? "Forwarding Query" : "Preserve Query: Off"}
             </div>
-            <p className="text-[11px] text-zinc-400 mt-1 truncate">
+            <p className="text-xs text-zinc-400 mt-1 truncate">
               Created {formatDisplayDate(link.createdAt)}
             </p>
           </CardContent>
@@ -275,7 +276,7 @@ export function LinkStatsPage(): React.ReactElement {
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 pb-0">
           <div>
             <CardTitle className="text-base font-semibold">Redirect Activity</CardTitle>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
               Daily click breakdown in UTC time
             </p>
           </div>
@@ -320,9 +321,9 @@ export function LinkStatsPage(): React.ReactElement {
                   const pct = Math.round((c.clicks / maxCountryClicks) * 100);
                   return (
                     <div key={c.value} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-medium">
+                      <div className="flex items-center justify-between text-sm font-medium">
                         <span className="truncate">{formatCountryName(c.value)}</span>
-                        <span className="font-mono text-zinc-500 dark:text-zinc-400">
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">
                           {c.clicks.toLocaleString()}
                         </span>
                       </div>
@@ -354,9 +355,9 @@ export function LinkStatsPage(): React.ReactElement {
                   const label = r.value === "" || r.value === "direct" ? "Direct / None" : r.value;
                   return (
                     <div key={r.value} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-medium">
+                      <div className="flex items-center justify-between text-sm font-medium">
                         <span className="truncate">{label}</span>
-                        <span className="font-mono text-zinc-500 dark:text-zinc-400">
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">
                           {r.clicks.toLocaleString()}
                         </span>
                       </div>

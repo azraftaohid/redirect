@@ -209,7 +209,7 @@ export function SettingsPage(): React.ReactElement {
       (principal?.kind === "initial" && tokenToDelete.isInitial));
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">API Tokens &amp; Access</h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
@@ -240,13 +240,13 @@ export function SettingsPage(): React.ReactElement {
               </Badge>
             )}
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-sm">
             The bearer token currently stored in this browser for authenticating API requests.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800">
-            <div className="flex-1 font-mono text-xs truncate">
+            <div className="flex-1 font-mono text-sm truncate">
               {showStoredToken
                 ? storedToken || "No token stored"
                 : storedToken
@@ -333,19 +333,19 @@ export function SettingsPage(): React.ReactElement {
                   >
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{t.name}</span>
+                        <span className="font-semibold text-base">{t.name}</span>
                         {t.isInitial && (
-                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 text-amber-600 border-amber-300">
+                          <Badge variant="outline" className="text-xs py-0.5 px-2 text-amber-600 border-amber-300">
                             Initial
                           </Badge>
                         )}
                         {isCurrent && (
-                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                          <Badge variant="secondary" className="text-xs py-0.5 px-2">
                             Active Session
                           </Badge>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-zinc-400 font-mono">
+                      <div className="flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400 font-mono">
                         <span>Preview: {t.preview}</span>
                         <span>&bull;</span>
                         <span>Created: {formatDisplayDate(t.createdAt)}</span>
@@ -362,7 +362,7 @@ export function SettingsPage(): React.ReactElement {
                       variant="ghost"
                       size="sm"
                       onClick={() => setTokenToDelete(t)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 h-8 px-2.5 text-xs gap-1.5 self-end sm:self-center"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Revoke</span>

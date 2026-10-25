@@ -240,7 +240,7 @@ export function DashboardPage(): React.ReactElement {
               setSearch(e.target.value);
               setPage(1);
             }}
-            className="pl-9 pr-8 h-9 text-xs"
+            className="pl-9 pr-8 h-10 text-sm"
           />
           {search && (
             <button
@@ -250,7 +250,7 @@ export function DashboardPage(): React.ReactElement {
               }}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -264,7 +264,7 @@ export function DashboardPage(): React.ReactElement {
               setStatusFilter(e.target.value);
               setPage(1);
             }}
-            className="h-9 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs shadow-xs dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+            className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm shadow-xs dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
           >
             <option value="all">All Statuses</option>
             <option value="active">Active Only</option>
@@ -280,7 +280,7 @@ export function DashboardPage(): React.ReactElement {
               setSortOrder(so as "asc" | "desc");
               setPage(1);
             }}
-            className="h-9 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs shadow-xs dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+            className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm shadow-xs dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
           >
             <option value="createdAt:desc">Newest First</option>
             <option value="createdAt:asc">Oldest First</option>
@@ -290,7 +290,7 @@ export function DashboardPage(): React.ReactElement {
 
           {/* Tag Filter Input / Clear */}
           {tag && (
-            <div className="flex items-center gap-1 bg-zinc-200 dark:bg-zinc-800 text-xs px-2 py-1 rounded-md">
+            <div className="flex items-center gap-1.5 bg-zinc-200 dark:bg-zinc-800 text-sm px-2.5 py-1 rounded-md">
               <span>#{tag}</span>
               <button
                 onClick={() => {
@@ -299,7 +299,7 @@ export function DashboardPage(): React.ReactElement {
                 }}
                 className="hover:text-red-500"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
@@ -319,7 +319,7 @@ export function DashboardPage(): React.ReactElement {
               <Link2 className="w-6 h-6" />
             </div>
             <h3 className="text-base font-semibold">No links found</h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-sm">
               {search || tag || statusFilter !== "all"
                 ? "No links matched your current filter criteria. Try clearing your filters."
                 : "You haven't created any short links yet. Shorten your first link above to get started!"}
@@ -356,7 +356,7 @@ export function DashboardPage(): React.ReactElement {
       {/* Pagination Footer */}
       {totalCount > PAGE_SIZE && (
         <div className="flex items-center justify-between pt-2">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Showing {(page - 1) * PAGE_SIZE + 1}–
             {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} links
           </p>

@@ -37,20 +37,20 @@ export function Layout({ children }: LayoutProps): React.ReactElement {
     switch (principal.kind) {
       case "env":
         return (
-          <Badge variant="secondary" className="gap-1 font-mono text-[11px] py-0 px-2">
+          <Badge variant="secondary" className="gap-1 font-mono text-xs py-0.5 px-2">
             <ShieldCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
             <span>Master Key (Env)</span>
           </Badge>
         );
       case "initial":
         return (
-          <Badge variant="outline" className="gap-1 font-mono text-[11px] py-0 px-2 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800">
+          <Badge variant="outline" className="gap-1 font-mono text-xs py-0.5 px-2 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800">
             <span>Initial Token</span>
           </Badge>
         );
       case "token":
         return (
-          <Badge variant="secondary" className="gap-1 font-mono text-[11px] py-0 px-2 truncate max-w-[140px]">
+          <Badge variant="secondary" className="gap-1 font-mono text-xs py-0.5 px-2 truncate max-w-[160px]">
             <span>{principal.name}</span>
           </Badge>
         );
