@@ -48,9 +48,9 @@ Follow the phases in order. After each phase, run the verification listed for it
 | F8 | **Client-side analytics zero-filling & dynamic dimensions.** Zero-fill missing UTC days in `LinkStats.daily` on the client. Render `country` and `referrer` breakdown sections **only** when those keys exist on `LinkStats.dimensions`. |
 | F9 | **Client-side QR generation.** Generate QR codes locally in the browser as `<svg>` / `data:image/png` (no third-party QR API requests). |
 | F10 | **UI component architecture, routing & charting.** React + TypeScript + Vite + Tailwind CSS + shadcn/ui components (`class-variance-authority`, Radix Dialog, Alert Dialog, Dropdown Menu, Switch, Label, Sonner toast). Use `wouter` (~1.5 KB, with `base: "/app"`) for routing. Use styled native `<select>` for status codes and sorts (avoiding Radix Select portal focus traps, heavy bundle, and jsdom polyfill friction). Use responsive single-tree row components rather than duplicate table/card render trees. For link analytics, render the daily clicks time-series chart with a lightweight, self-contained SVG component (columns for 7/30 days, area sparkline for 90/365 days, UTC days axis) avoiding heavy charting libraries (e.g. Recharts). |
-| F11 | **Service Worker cache & offline contract.** In `public/sw.js` (scoped to `/app/`), version cache (`redirect-app-v1`), precache `/app/index.html` on `install` with `skipWaiting()`, and cleanup old caches in `activate`. For `/app/` navigations: network-first; if network response is an opaque redirect, redirected, or non-200, pass it directly to the browser (never cache, never fall back to cache) so expired Access sessions can reach the login page; fall back to cached `/app/index.html` **only** if network `fetch` throws (offline). Serve `/app/assets/*` with `Cache-Control: public, max-age=31536000, immutable`. |
-| F12 | **Shared slug generator & date timezone safety.** Base62 `generateRandomSlug` lives in `@redirect/shared` so both API and UI use the identical canonical generator. For HTML5 `<input type="datetime-local">`, use explicit helpers converting to/from local time (`YYYY-MM-DDTHH:mm`) and UTC ISO-8601 strings to prevent timezone offset truncation. |
-| F13 | **KV replication grace window & token safety.** KV writes take up to 60s to propagate across Cloudflare edge PoPs. After rotating `initial_token` or creating a token, surface the token in a dedicated copy modal. Do not aggressively wipe `localStorage` on a single transient 401 if a token was rotated or set within the last 60 seconds; display a retry prompt. |
+| F11 | **Service Worker cache & offline contract.** In `public/sw.js` (scoped to `/app/`), version cache (`redirect-app-v1`), precache `/app/index.html` on `install` with `skipWaiting()`, and cleanup old caches in `activate`. Strictly bypass `/app/sw.js` (never intercept SW update checks), external origins, and non-GET requests. For `/app/` navigations: network-first; pass through opaque redirects, redirected, or non-200 responses directly to the browser (never cache, never fall back to cache) so expired Access sessions reach login; fall back to cached `/app/index.html` **only** on true network failure. Serve `/app/assets/*` with `Cache-Control: public, max-age=31536000, immutable`, and serve `/app/sw.js`, `/app/index.html`, and extensionless SPA navigations with `Cache-Control: no-cache`. |
+| F12 | **Shared slug generator & date timezone safety.** Both `generateRandomSlug` and `generateValidRandomSlug` live in `@redirect/shared` so API and UI use the identical canonical generator. For HTML5 `<input type="datetime-local">`, use explicit helpers converting to/from local time (`YYYY-MM-DDTHH:mm`) and UTC ISO-8601 strings to prevent timezone offset truncation. |
+| F13 | **KV replication grace window & token safety.** KV writes take up to 60s to propagate across Cloudflare edge PoPs. Persist the creation/rotation timestamp in `localStorage` (`redirect_auth_token_set_at`). Do not aggressively wipe `localStorage` on a single transient 401 if a token was rotated or set within the last 60 seconds (even across browser reloads); display a retry prompt. |
 
 Non-goals: multi-user, multi-domain, aliases/redirect history, export/import endpoints (use `wrangler d1 export`), unique-visitor analytics.
 
@@ -244,9 +244,9 @@ Follow Phases **F1** through **F8** in order.
 Configure `apps/web` as a React + TypeScript + Vite package that outputs directly into the asset structure expected by `apps/api/wrangler.jsonc` (`../web/dist`).
 
 1. **Move Canonical Slug Generator to `@redirect/shared`:**
-   - Create `packages/shared/src/slug.ts` exporting `ALPHABET` and `generateRandomSlug(length = 6)`.
-   - Re-export `generateRandomSlug` from `packages/shared/src/index.ts`.
-   - Update `apps/api/src/utils/slug.ts` to re-export from `@redirect/shared`.
+   - Create `packages/shared/src/slug.ts` exporting `ALPHABET`, `generateRandomSlug(length = 6)`, and `generateValidRandomSlug(length = 6)`.
+   - Re-export `generateRandomSlug` and `generateValidRandomSlug` from `packages/shared/src/index.ts`.
+   - Update `apps/api/src/utils/slug.ts` to `export { generateRandomSlug, generateValidRandomSlug } from "@redirect/shared";`.
    - Add `"build": "tsc --noEmit"` (or `"build": "tsc"`) to `packages/shared/package.json`.
 
 2. **`apps/web/package.json`:**
@@ -271,8 +271,8 @@ Configure `apps/web` as a React + TypeScript + Vite package that outputs directl
    - Configure `server`:
      - `port: 5173`
      - Proxy configuration:
-       - Proxy `/api` to `http://127.0.0.1:8787`.
-       - Proxy single-segment root slugs `/:slug` to `http://127.0.0.1:8787` (bypassing `/app`, `/@*`, `/src`, `/node_modules`, and asset paths with file extensions) so clicking or testing generated short links works seamlessly on localhost:5173.
+       - `"/api"`: `{ target: "http://127.0.0.1:8787", changeOrigin: false }`.
+       - `"^/(?!app|@|node_modules|src|public|favicon|.*\\..*)[^/]+/?$"`: `{ target: "http://127.0.0.1:8787", changeOrigin: false }` (proxies single-segment short links `/:slug` to Wrangler on port 8787 while allowing Vite internal assets, scripts, and `/app` to resolve locally).
    - Add a small Vite `closeBundle` plugin hook in `vite.config.ts` that copies `apps/web/404.html` to `apps/web/dist/404.html` on every build so the root 404 asset is always present alongside `dist/app/`.
 
 5. **Standalone `apps/web/404.html`:**
@@ -313,8 +313,14 @@ Configure `apps/web` as a React + TypeScript + Vite package that outputs directl
 Implement a strictly typed API client and authentication state layer in `apps/web/src/api/` and `apps/web/src/context/`.
 
 1. **Token Storage (`src/api/client.ts`):**
-   - Storage key constant: `AUTH_TOKEN_STORAGE_KEY = "redirect_auth_token"`.
-   - Helpers: `getStoredToken(): string | null`, `setStoredToken(token: string): void`, `clearStoredToken(): void`.
+   - Storage key constants:
+     - `AUTH_TOKEN_STORAGE_KEY = "redirect_auth_token"`
+     - `AUTH_TOKEN_SET_AT_STORAGE_KEY = "redirect_auth_token_set_at"`
+   - Helpers:
+     - `getStoredToken(): string | null`
+     - `getStoredTokenSetAt(): number` (`Number(localStorage.getItem(AUTH_TOKEN_SET_AT_STORAGE_KEY) || 0)`)
+     - `setStoredToken(token: string): void` (stores `token` and sets `AUTH_TOKEN_SET_AT_STORAGE_KEY = Date.now().toString()`)
+     - `clearStoredToken(): void` (removes both keys from `localStorage`)
 
 2. **Error Classes (`src/api/client.ts`):**
    - `ApiClientError extends Error`:
@@ -347,18 +353,17 @@ Implement a strictly typed API client and authentication state layer in `apps/we
 
 4. **Auth Context (`src/context/AuthContext.tsx`) & Unlock Screen (`src/components/AuthGate.tsx`):**
    - State: `status: "loading" | "unauthenticated" | "authenticated"`, `principal`, `accessExpired: boolean`, `error: string | null`.
-   - Track `lastTokenSetAt` timestamp.
    - On mount:
      - If `getStoredToken()` exists: call `verifyAuth()`.
        - On `200`: set `status = "authenticated"` and `principal`.
        - On `401`:
-         - If `Date.now() - lastTokenSetAt < 60_000` (KV replication grace period): do NOT wipe token; show toast *"KV propagation in progress across edge locations. Click to retry."* and keep state as `"authenticated"`.
+         - If `Date.now() - getStoredTokenSetAt() < 60_000` (KV replication grace period persisted across reloads): do NOT wipe token; show toast *"KV propagation in progress across edge locations. Click to retry."* and keep state as `"authenticated"`.
          - Otherwise: call `clearStoredToken()`, set `status = "unauthenticated"`.
        - On `AccessSessionExpiredError`: keep token in `localStorage`, set `accessExpired = true`.
      - If no stored token exists: set `status = "unauthenticated"` and fire `bootstrapInitialTokenPing()` once in the background (Decision F6).
-   - `login(rawToken: string)`: trims input, calls `verifyAuth(rawToken)`, and on success stores the token in `localStorage`, records `lastTokenSetAt = Date.now()`, and transitions to `"authenticated"`.
-   - `updateActiveToken(newToken: string)`: updates `localStorage` in-place and records `lastTokenSetAt = Date.now()` (used when rotating `initial_token`).
-   - `logout()`: clears `localStorage` and resets state to `"unauthenticated"`.
+   - `login(rawToken: string)`: trims input, calls `verifyAuth(rawToken)`, and on success calls `setStoredToken(rawToken)` and transitions to `"authenticated"`.
+   - `updateActiveToken(newToken: string)`: calls `setStoredToken(newToken)` in-place (used when rotating `initial_token`).
+   - `logout()`: calls `clearStoredToken()` and resets state to `"unauthenticated"`.
    - **`AuthGate.tsx` UI:**
      - Clean password/token input with show/hide toggle and "Unlock" submit button.
      - Collapsible **"Where do I find my token?"** section explaining:
@@ -583,19 +588,69 @@ Implement installable PWA support and mobile one-tap link shortening under `/app
      }
      ```
    - **Worker Implementation (`public/sw.js`, Decisions F2 & F11):**
-     - Versioned cache name: `const CACHE_NAME = "redirect-app-v1";`.
-     - `install` lifecycle event: precache `/app/index.html` and call `self.skipWaiting()`.
-     - `activate` lifecycle event: clean up any older cache keys and call `self.clients.claim()`.
-     - `fetch` lifecycle event:
-       - Scope check: only handle `GET` requests whose pathname starts with `"/app/"`. Bypass everything else (never intercept `/api/*` or root `/:slug`).
-       - For `/app/assets/*` (hashed immutable Vite bundles): cache-first with network fallback.
-       - For navigation requests under `/app/*`:
-         - Network-first: attempt `fetch(event.request)`.
-         - If the response is an opaque redirect (`response.type === "opaqueredirect"`), redirected (`response.redirected`), or non-200 (`response.status !== 200`): **pass it directly through to the browser** (do NOT cache it, and do NOT fall back to cached `/app/index.html`, ensuring expired Cloudflare Access sessions can navigate to the login screen).
-         - If `response.status === 200`: clone response, store in cache for `/app/index.html`, and return.
-         - Only when network `fetch` throws (offline error) fall back to `caches.match("/app/index.html")`.
-   - **Worker Asset Caching Header (`apps/api/src/routes/app.ts`):**
-     - For requests under `/app/assets/*`, append `Cache-Control: public, max-age=31536000, immutable`.
+     ```javascript
+     const CACHE_NAME = "redirect-app-v1";
+
+     self.addEventListener("install", (event) => {
+       event.waitUntil(
+         caches.open(CACHE_NAME).then((cache) => cache.addAll(["/app/index.html"])).then(() => self.skipWaiting())
+       );
+     });
+
+     self.addEventListener("activate", (event) => {
+       event.waitUntil(
+         caches.keys().then((keys) =>
+           Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+         ).then(() => self.clients.claim())
+       );
+     });
+
+     self.addEventListener("fetch", (event) => {
+       const url = new URL(event.request.url);
+
+       // 1. Strictly bypass non-GET, external origins, and sw.js itself (prevents intercepting updates)
+       if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+       if (url.pathname === "/app/sw.js") return;
+       if (!url.pathname.startsWith("/app/")) return;
+
+       // 2. Cache-first with runtime caching for immutable hashed assets
+       if (url.pathname.startsWith("/app/assets/")) {
+         event.respondWith(
+           caches.match(event.request).then((cached) => {
+             if (cached) return cached;
+             return fetch(event.request).then((res) => {
+               if (res.status === 200) {
+                 const clone = res.clone();
+                 caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
+               }
+               return res;
+             });
+           })
+         );
+         return;
+       }
+
+       // 3. Navigation requests: Network-first, direct passthrough for redirects/errors
+       if (event.request.mode === "navigate") {
+         event.respondWith(
+           fetch(event.request)
+             .then((res) => {
+               // Never cache redirects, Access login pages, or server errors
+               if (res.type === "opaqueredirect" || res.redirected || res.status !== 200) {
+                 return res;
+               }
+               const clone = res.clone();
+               caches.open(CACHE_NAME).then((c) => c.put("/app/index.html", clone));
+               return res;
+             })
+             .catch(() => caches.match("/app/index.html"))
+         );
+       }
+     });
+     ```
+   - **Complete Cache-Control Rules in `apps/api/src/routes/app.ts`:**
+     - For `/app/assets/*` with status 200: set `Cache-Control: public, max-age=31536000, immutable`.
+     - For `/app/sw.js`, `/app/index.html`, and extensionless SPA navigations: set `Cache-Control: no-cache` to ensure users always receive the newest service worker and app shell immediately.
 
 3. **Share Payload Extractor (`src/utils/share.ts`) & Page (`src/pages/ShareTargetPage.tsx`):**
    - `extractSharedPayload(searchParams: URLSearchParams): { targetUrl: string; title: string }`:
