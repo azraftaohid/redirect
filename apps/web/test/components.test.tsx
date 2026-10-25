@@ -7,6 +7,8 @@ import { Card, CardHeader, CardTitle, CardContent } from "../src/components/ui/c
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { AuthGate } from "../src/components/AuthGate";
 import { AccessExpiredBanner } from "../src/components/AccessExpiredBanner";
+import { DailyChart } from "../src/components/DailyChart";
+import { Layout } from "../src/components/Layout";
 
 describe("UI Components", () => {
   it("renders Button with custom label and click handler", () => {
@@ -145,5 +147,63 @@ describe("AuthGate & AccessExpiredBanner", () => {
     // Copy command button
     const copyBtn = screen.getByRole("button", { name: /copy command/i });
     expect(copyBtn).toBeInTheDocument();
+  });
+});
+
+describe("DailyChart & Layout Navigation", () => {
+  beforeEach(() => {
+    window.scrollTo = vi.fn();
+  });
+
+  it("renders DailyChart with desktop viewBox by default", () => {
+    const sampleData = [
+      { day: "2026-10-24", clicks: 5 },
+      { day: "2026-10-25", clicks: 12 },
+    ];
+
+    const { container } = render(<DailyChart data={sampleData} days={7} />);
+    const svg = container.querySelector("svg");
+    expect(svg).toBeInTheDocument();
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 800 260");
+  });
+
+  it("renders DailyChart with mobile viewBox (480x280) when mobile media query matches", () => {
+    // Mock matchMedia to match mobile screen
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes("max-width: 640px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    const sampleData = [
+      { day: "2026-10-24", clicks: 5 },
+      { day: "2026-10-25", clicks: 12 },
+    ];
+
+    const { container } = render(<DailyChart data={sampleData} days={7} />);
+    const svg = container.querySelector("svg");
+    expect(svg).toBeInTheDocument();
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 480 280");
+  });
+
+  it("calls window.scrollTo(0, 0) in Layout on mount and navigation", () => {
+    render(
+      <AuthProvider>
+        <Layout>
+          <div>Page Content</div>
+        </Layout>
+      </AuthProvider>
+    );
+
+    expect(window.scrollTo).toHaveBeenCalledWith({
+      top: 0,
+      left: 0,
+      behavior: "instant",
+    });
   });
 });

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,11 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps): React.ReactElement {
   const [location] = useLocation();
   const { principal, logout } = useAuth();
+
+  // Reset scroll to top on any route navigation
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [location]);
 
   const navItems = [
     { href: "/", label: "Links", icon: Link2, exact: true },

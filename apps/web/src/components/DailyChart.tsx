@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { DailyClickPoint } from "@/utils/stats";
 import { formatUtcDay } from "@/utils/stats";
 
@@ -11,20 +11,38 @@ export function DailyChart({ data, days }: DailyChartProps): React.ReactElement 
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window !== "undefined" && window.matchMedia) {
+      return window.matchMedia("(max-width: 640px)").matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia("(max-width: 640px)");
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
   if (!data || data.length === 0) {
     return (
-      <div className="h-60 flex items-center justify-center text-xs text-zinc-400">
+      <div className="h-48 sm:h-60 flex items-center justify-center text-xs text-zinc-400">
         No timeseries data available
       </div>
     );
   }
 
-  const width = 800;
-  const height = 240;
-  const paddingLeft = 45;
-  const paddingRight = 20;
-  const paddingTop = 25;
-  const paddingBottom = 35;
+  // Adjust aspect ratio and height for mobile screens so graph doesn't render too small
+  const width = isMobile ? 480 : 800;
+  const height = isMobile ? 280 : 260;
+  const paddingLeft = isMobile ? 36 : 45;
+  const paddingRight = isMobile ? 12 : 20;
+  const paddingTop = isMobile ? 20 : 25;
+  const paddingBottom = isMobile ? 30 : 35;
 
   const plotWidth = width - paddingLeft - paddingRight;
   const plotHeight = height - paddingTop - paddingBottom;
@@ -69,7 +87,7 @@ export function DailyChart({ data, days }: DailyChartProps): React.ReactElement 
   )},${paddingTop + plotHeight} Z`;
 
   // X Axis tick intervals
-  const tickCount = Math.min(6, data.length);
+  const tickCount = Math.min(isMobile ? 4 : 6, data.length);
   const tickStep = Math.max(1, Math.floor((data.length - 1) / (tickCount - 1)));
   const xTicks: number[] = [];
   for (let i = 0; i < data.length; i += tickStep) {
@@ -213,7 +231,7 @@ export function DailyChart({ data, days }: DailyChartProps): React.ReactElement 
       {/* Floating Scrub Tooltip */}
       {hoverIndex !== null && activePoint && (
         <div
-          className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs rounded-lg px-2.5 py-1.5 shadow-lg border border-zinc-700 dark:border-zinc-300 z-10 transition-transform duration-75 flex flex-col items-center gap-0.5"
+          className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs rounded-lg px-2.5 py-1.5 shadow-lg border border-zinc-700 dark:border-zinc-300 z-10 transition-transform duration-75 flex flex-col items-center gap-0.5 whitespace-nowrap"
           style={{
             left: `${(activeX / width) * 100}%`,
             top: `${Math.max(10, (activeY / height) * 100 - 8)}%`,

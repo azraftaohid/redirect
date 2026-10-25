@@ -42,6 +42,10 @@ export function LinkStatsPage(): React.ReactElement {
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [id]);
+
   const fetchData = useCallback(
     async (showRefreshing = false) => {
       if (!id) return;
