@@ -20,11 +20,11 @@ if (!existsSync(appIndexHtml)) {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Redirect App</title>
+    <title>Redirect — Link Manager</title>
   </head>
   <body>
     <div id="root">
-      <h1>Redirect App</h1>
+      <h1>Redirect — Link Manager</h1>
       <p>Frontend placeholder. Application will be loaded here.</p>
     </div>
   </body>

@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "node scripts/ensure-assets.mjs",
     "test": "vitest run",
-    "predeploy": "node scripts/ensure-assets.mjs",
+    "predeploy": "node scripts/verify-dist.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "deploy": "wrangler deploy"

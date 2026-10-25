@@ -5,13 +5,13 @@
   "description": "Simple, lightweight URL redirection platform on Cloudflare Workers & D1",
   "packageManager": "pnpm@11.2.2",
   "scripts": {
-    "dev": "pnpm --filter @redirect/api dev",
-    "build": "pnpm -r build",
-    "test": "pnpm --filter @redirect/api test",
+    "dev": "pnpm --parallel --filter @redirect/api --filter @redirect/web dev",
+    "build": "pnpm --filter @redirect/web build && pnpm --filter @redirect/api build",
+    "test": "pnpm --filter @redirect/api test && pnpm --filter @redirect/web test",
     "typecheck": "pnpm -r typecheck",
     "db:migrate:local": "pnpm --filter @redirect/api db:migrate:local",
     "db:migrate:remote": "pnpm --filter @redirect/api db:migrate:remote",
-    "deploy": "pnpm --filter @redirect/api deploy"
+    "deploy": "pnpm --filter @redirect/web build && pnpm --filter @redirect/api deploy"
   },
   "devDependencies": {
     "typescript": "^5.8.0"

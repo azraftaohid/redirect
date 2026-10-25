@@ -59,7 +59,8 @@ describe("Request Dispatcher & App Serving", () => {
     const resRoot = await fetchWorker("https://redirect.example.com/app/");
     expect(resRoot.status).toBe(200);
     const htmlRoot = await resRoot.text();
-    expect(htmlRoot).toContain("<title>Redirect App</title>");
+    expect(htmlRoot).toContain("<title>Redirect");
+    expect(htmlRoot).toContain('<div id="root">');
     expect(resRoot.headers.get("Content-Security-Policy")).toBe(
       APP_SECURITY_HEADERS["Content-Security-Policy"]
     );
@@ -70,7 +71,8 @@ describe("Request Dispatcher & App Serving", () => {
     const resDeep = await fetchWorker("https://redirect.example.com/app/some/deep/route");
     expect(resDeep.status).toBe(200);
     const htmlDeep = await resDeep.text();
-    expect(htmlDeep).toContain("<title>Redirect App</title>");
+    expect(htmlDeep).toContain("<title>Redirect");
+    expect(htmlDeep).toContain('<div id="root">');
     expect(resDeep.headers.get("Content-Security-Policy")).toBe(
       APP_SECURITY_HEADERS["Content-Security-Policy"]
     );
