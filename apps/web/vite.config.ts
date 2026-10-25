@@ -8,8 +8,8 @@ function copy404Plugin(): Plugin {
   return {
     name: "copy-root-404",
     closeBundle() {
-      const src404 = path.resolve(__dirname, "404.html");
-      const destDir = path.resolve(__dirname, "dist");
+      const src404 = path.resolve(import.meta.dirname, "404.html");
+      const destDir = path.resolve(import.meta.dirname, "dist");
       const dest404 = path.resolve(destDir, "404.html");
       if (existsSync(src404)) {
         if (!existsSync(destDir)) {
@@ -45,7 +45,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   plugins: [tailwindcss(), react(), copy404Plugin(), devRootRedirectPlugin()],
