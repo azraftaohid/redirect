@@ -1,0 +1,27 @@
+export interface Env {
+  DB: D1Database;
+  AUTH_TOKENS: KVNamespace;
+  ASSETS?: Fetcher;
+  API_KEY?: string;
+  FALLBACK_URL?: string;
+  OWN_HOSTNAMES?: string;
+  ANALYTICS_ENABLED?: string;
+  ANALYTICS_DIMENSIONS?: string;
+}
+
+export type PrincipalKind = "env" | "token" | "initial";
+
+export interface Principal {
+  kind: PrincipalKind;
+  id: string;
+  name: string;
+}
+
+export interface AppVariables {
+  principal?: Principal;
+}
+
+export interface AppContext {
+  Bindings: Env;
+  Variables: AppVariables;
+}

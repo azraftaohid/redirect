@@ -4,10 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/ensure-assets.mjs",
     "dev": "wrangler dev",
     "build": "tsc --noEmit",
+    "pretypecheck": "node scripts/ensure-assets.mjs",
     "typecheck": "tsc --noEmit",
+    "pretest": "node scripts/ensure-assets.mjs",
     "test": "vitest run",
+    "predeploy": "node scripts/ensure-assets.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "deploy": "wrangler deploy"
