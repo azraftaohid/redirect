@@ -1,6 +1,7 @@
 import type { Env, Principal } from "../types.js";
 
 export const TOKEN_REGEX = /^[A-Za-z0-9_-]{16,128}$/;
+const BEARER_REGEX = /^Bearer[ \t]+(\S.*)$/i;
 
 export interface StoredTokenRecord {
   id: string;
@@ -64,8 +65,8 @@ export async function safeEqual(a: string, b: string): Promise<boolean> {
 export function extractToken(request: Request): string | null {
   const authHeader = request.headers.get("Authorization");
   if (authHeader) {
-    const match = authHeader.match(/^Bearer\s+(.+)$/i);
-    if (match && match[1]) {
+    const match = BEARER_REGEX.exec(authHeader);
+    if (match?.[1]) {
       return match[1].trim();
     }
   }
