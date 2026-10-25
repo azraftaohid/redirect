@@ -1,0 +1,9 @@
+{
+  "name": "@redirect/web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "echo \"frontend not implemented\"",
+    "typecheck": "echo \"frontend not implemented\""
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "redirect",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Simple, lightweight URL redirection platform on Cloudflare Workers & D1",
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "dev": "pnpm --filter @redirect/api dev",
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @redirect/api test",
+    "typecheck": "pnpm -r typecheck",
+    "db:migrate:local": "pnpm --filter @redirect/api db:migrate:local",
+    "db:migrate:remote": "pnpm --filter @redirect/api db:migrate:remote",
+    "deploy": "pnpm --filter @redirect/api deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
