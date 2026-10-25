@@ -28,7 +28,7 @@ export function Layout({ children }: LayoutProps): React.ReactElement {
   ];
 
   const isActive = (href: string, exact?: boolean) => {
-    if (exact) return location === href;
+    if (exact) return location === href || (href === "/" && (location === "" || location === "/"));
     return location.startsWith(href);
   };
 

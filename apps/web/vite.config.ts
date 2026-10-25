@@ -21,6 +21,22 @@ function copy404Plugin(): Plugin {
   };
 }
 
+function devRootRedirectPlugin(): Plugin {
+  return {
+    name: "dev-root-redirect",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url === "/" || req.url === "") {
+          res.writeHead(302, { Location: "/app/" });
+          res.end();
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "/app/",
   build: {
@@ -32,7 +48,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  plugins: [tailwindcss(), react(), copy404Plugin()],
+  plugins: [tailwindcss(), react(), copy404Plugin(), devRootRedirectPlugin()],
   server: {
     port: 5173,
     proxy: {

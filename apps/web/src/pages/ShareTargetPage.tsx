@@ -45,6 +45,21 @@ export function ShareTargetPage(): React.ReactElement {
     }
   }, []);
 
+  // Debounced check for existing link when typing URL
+  useEffect(() => {
+    const trimmed = targetUrl.trim();
+    if (!trimmed || !/^https?:\/\/.+/i.test(trimmed)) {
+      setCheckingExisting(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      checkIfAlreadyExists(trimmed);
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [targetUrl]);
+
   async function checkIfAlreadyExists(url: string) {
     setCheckingExisting(true);
     try {
@@ -217,27 +232,23 @@ export function ShareTargetPage(): React.ReactElement {
             </div>
           ) : (
             <form onSubmit={handleCreate} className="space-y-4">
-              {checkingExisting && (
-                <div className="flex items-center gap-2 text-xs text-zinc-500">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Checking for existing short links...</span>
-                </div>
-              )}
-
               {/* Target URL */}
               <div className="space-y-1.5">
-                <Label htmlFor="share-url">Target Destination URL</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="share-url">Target Destination URL</Label>
+                  {checkingExisting && (
+                    <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Checking...</span>
+                    </div>
+                  )}
+                </div>
                 <Input
                   id="share-url"
                   type="text"
                   placeholder="https://example.com/..."
                   value={targetUrl}
-                  onChange={(e) => {
-                    setTargetUrl(e.target.value);
-                    if (e.target.value.trim()) {
-                      checkIfAlreadyExists(e.target.value.trim());
-                    }
-                  }}
+                  onChange={(e) => setTargetUrl(e.target.value)}
                   disabled={submitting}
                   className="font-mono text-xs"
                 />

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useLocation } from "wouter";
 import type { LinkRecord, ListLinksQuery } from "@redirect/shared";
 import { listLinks, createLink } from "@/api/client";
 import { LinkRow } from "@/components/LinkRow";
@@ -21,8 +20,6 @@ import { toast } from "sonner";
 const PAGE_SIZE = 20;
 
 export function DashboardPage(): React.ReactElement {
-  const [location] = useLocation();
-
   // Parse filters from URL
   const searchParams = new URLSearchParams(
     typeof window !== "undefined" ? window.location.search : ""
@@ -59,19 +56,31 @@ export function DashboardPage(): React.ReactElement {
   // Update URL search parameters when filters change
   const updateUrlParams = useCallback(
     (newParams: Record<string, string | number | undefined>) => {
+      if (typeof window === "undefined") return;
       const sp = new URLSearchParams(window.location.search);
       Object.entries(newParams).forEach(([k, v]) => {
-        if (v === undefined || v === "" || (k === "page" && v === 1) || (k === "status" && v === "all")) {
+        if (
+          v === undefined ||
+          v === "" ||
+          (k === "page" && v === 1) ||
+          (k === "status" && v === "all") ||
+          (k === "sortBy" && v === "createdAt") ||
+          (k === "sortOrder" && v === "desc")
+        ) {
           sp.delete(k);
         } else {
           sp.set(k, String(v));
         }
       });
       const qs = sp.toString();
-      const newPath = qs ? `${location}?${qs}` : location;
-      window.history.replaceState(null, "", newPath);
+      const pathname = window.location.pathname;
+      const targetUrl = qs ? `${pathname}?${qs}` : pathname;
+      const currentUrl = window.location.pathname + window.location.search;
+      if (currentUrl !== targetUrl) {
+        window.history.replaceState(null, "", targetUrl);
+      }
     },
-    [location]
+    []
   );
 
   // Fetch links

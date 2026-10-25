@@ -164,7 +164,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
                   <div>
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">2. Production Cloudflare KV</p>
                     <p className="text-[11px] mt-0.5">
-                      In Cloudflare Dashboard &gt; Storage &amp; Databases &gt; KV &gt; <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">REDIRECT_DATA</code>, check the key <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">auth:initial_token</code> (or any <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">auth:token:*</code> key) to view its plaintext value.
+                      In Cloudflare Dashboard &gt; Storage &amp; Databases &gt; KV &gt; <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">AUTH_TOKENS</code>, check the key <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">initial_token</code> (or any <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">token:*</code> key) to view its plaintext value.
                     </p>
                   </div>
                 </div>
@@ -177,7 +177,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
                       In local development or via Wrangler CLI:
                     </p>
                     <pre className="mt-1 p-1.5 bg-zinc-200 dark:bg-zinc-900 rounded font-mono text-[10px] overflow-x-auto text-zinc-800 dark:text-zinc-300">
-                      pnpm --filter @redirect/api exec wrangler kv key get --binding REDIRECT_DATA auth:initial_token
+                      pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
                     </pre>
                   </div>
                 </div>
