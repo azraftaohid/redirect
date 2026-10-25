@@ -235,11 +235,18 @@ All backend phases have been implemented, verified, and committed:
 
 ---
 
-## 4. Part II — Frontend Implementation Plan (`apps/web`)
+## 4. Part II — Frontend Implementation Plan (`apps/web`) (Completed)
 
-Follow Phases **F1** through **F8** in order.
+All frontend phases have been implemented, verified, and committed:
 
-### Phase F1 — Frontend Workspace, Build Pipeline & Static 404 Page
+- [x] **Phase F1 — Workspace, Build Pipeline & Static 404 (`bbd6efc`):** React 19 + Vite 6 + Tailwind v4 setup with standalone `/404.html`, vector/raster PWA icons, manifest with `crossorigin="use-credentials"`, and `verify-dist.mjs` verification.
+- [x] **Phase F2 — API Client, Auth Context & Zero Trust Resilience (`3f0b2b4`):** Typed API client with `redirect: "manual"`, `AccessSessionExpiredError`, non-destructive token preservation, 60s KV replication grace period, and collapsible `AuthGate` recovery guide.
+- [x] **Phase F3 — UI Primitives, Layout & Router (`ea3b431`):** Custom shadcn-styled primitives with Radix UI, responsive navigation with mobile bottom bar, Wouter router with `/app` subpath isolation, and `AccessExpiredBanner`.
+- [x] **Phase F4 — Links Dashboard & Link Management (`6254c13`):** Quick shorten bar, filter toolbar synced to URL search parameters, responsive `LinkRow`, optimistic status toggling, `LinkFormModal` with immutable slug & caching warnings, and `QrCodeModal` with SVG/PNG generators.
+- [x] **Phase F5 — Stats & Analytics Visualization (`db8f5d1`):** `zeroFillDailySeries`, UTC-consistent day labels, responsive pure SVG `DailyChart` (bars & sparkline area), interactive scrub tooltips, and country/referrer breakdowns.
+- [x] **Phase F6 — PWA, Service Worker & Web Share Target (`61c0858`):** `extractSharedPayload` for iOS/Android share sheets, `ShareTargetPage` one-tap shortening & native share, Service Worker registration, and Worker cache headers (`immutable` for hashed assets, `no-cache` for entrypoints).
+- [x] **Phase F7 — Token Management & Settings (`c98d734`):** Active session view, active token revocation warnings, token creation modal, initial token rotation in KV with automatic session re-keying, and one-time secret reveal dialog.
+- [x] **Phase F8 — Web Test Suite & Monorepo DoD (`371a195`):** Full Vitest + jsdom suite (22 tests passing), full monorepo typecheck (0 errors), and full test suite (71 tests passing).
 
 Configure `apps/web` as a React + TypeScript + Vite package that outputs directly into the asset structure expected by `apps/api/wrangler.jsonc` (`../web/dist`).
 
@@ -758,23 +765,23 @@ Write automated tests in `apps/web/test/` and run the full monorepo test suite.
 
 ---
 
-## 5. Frontend Definition of Done
+## 5. Frontend Definition of Done (Verified)
 
 From `/home/azraftaohid/codes/redirect/`:
 
-- [ ] `pnpm build` succeeds and `node apps/api/scripts/verify-dist.mjs` passes, verifying:
+- [x] `pnpm build` succeeds and `node apps/api/scripts/verify-dist.mjs` passes, verifying:
   - `apps/web/dist/app/index.html` exists and contains no inline `<script>`.
   - `apps/web/dist/app/assets/*` exists.
   - `apps/web/dist/app/manifest.webmanifest` exists and declares PNG and SVG icons.
   - `apps/web/dist/app/sw.js` exists.
   - `apps/web/dist/404.html` exists.
   - No `apps/web/dist/index.html` or `apps/web/dist/assets/` exists at the root of `dist`.
-- [ ] `pnpm typecheck` passes across `packages/shared`, `apps/web`, and `apps/api` with zero errors.
-- [ ] `pnpm test` passes all backend workerd suites (`apps/api/test/*.test.ts`) and all frontend suites (`apps/web/test/*.test.ts`).
-- [ ] `index.html` links `/app/manifest.webmanifest` with `crossorigin="use-credentials"`.
-- [ ] Service worker is registered at `/app/sw.js` with `{ scope: "/app/" }`, precaches `/app/index.html` on install, and passes through opaque redirects and non-200 responses to avoid trapping expired Access sessions.
-- [ ] Worker serves `/app/assets/*` with `Cache-Control: public, max-age=31536000, immutable`.
-- [ ] All assets, styles, and QR generation work under the Worker's strict `Content-Security-Policy` without console CSP violations.
-- [ ] Opening `/app/` while unauthenticated triggers a background `/api/v1/auth/verify` ping so `initial_token` is lazily created in KV on first visit.
-- [ ] Links can be created, searched, filtered by tag/status, sorted, toggled active/inactive, edited (including renaming `slug` and clearing `expiresAt`), shared via QR code, and deleted.
-- [ ] Link statistics zero-fill missing days, format dates strictly in UTC, and render `country` / `referrer` breakdowns only when enabled by the backend.
+- [x] `pnpm typecheck` passes across `packages/shared`, `apps/web`, and `apps/api` with zero errors.
+- [x] `pnpm test` passes all backend workerd suites (`apps/api/test/*.test.ts`) and all frontend suites (`apps/web/test/*.test.ts`).
+- [x] `index.html` links `/app/manifest.webmanifest` with `crossorigin="use-credentials"`.
+- [x] Service worker is registered at `/app/sw.js` with `{ scope: "/app/" }`, precaches `/app/index.html` on install, and passes through opaque redirects and non-200 responses to avoid trapping expired Access sessions.
+- [x] Worker serves `/app/assets/*` with `Cache-Control: public, max-age=31536000, immutable`.
+- [x] All assets, styles, and QR generation work under the Worker's strict `Content-Security-Policy` without console CSP violations.
+- [x] Opening `/app/` while unauthenticated triggers a background `/api/v1/auth/verify` ping so `initial_token` is lazily created in KV on first visit.
+- [x] Links can be created, searched, filtered by tag/status, sorted, toggled active/inactive, edited (including renaming `slug` and clearing `expiresAt`), shared via QR code, and deleted.
+- [x] Link statistics zero-fill missing days, format dates strictly in UTC, and render `country` / `referrer` breakdowns only when enabled by the backend.
