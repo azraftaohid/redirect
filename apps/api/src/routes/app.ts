@@ -76,6 +76,18 @@ export async function serveApp(request: Request, env: Env): Promise<Response> {
     headers.set(key, value);
   }
 
+  // Set precise Cache-Control headers
+  if (url.pathname.startsWith("/app/assets/")) {
+    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  } else if (
+    url.pathname === "/app/sw.js" ||
+    url.pathname === "/app/index.html" ||
+    url.pathname === "/app/manifest.webmanifest" ||
+    !lastSegment.includes(".")
+  ) {
+    headers.set("Cache-Control", "no-cache");
+  }
+
   return new Response(res.body, {
     status: res.status,
     statusText: res.statusText,
