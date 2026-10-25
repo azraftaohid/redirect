@@ -1,0 +1,300 @@
+# Redirect
+
+A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers.
+
+Designed as a single Cloudflare Worker with Static Assets, Redirect handles public link redirection with sub-second response times, provides a token-authenticated management API, and features a frontend management application served under `/app/`.
+
+---
+
+## Architecture & Request Routing
+
+Every incoming request is dispatched by the Worker (`run_worker_first: true`) according to strict URL pathname precedence:
+
+```text
+[Incoming Request]
+   ├── /api/v1/*          ──► Management REST API (Token auth required)
+   ├── /app               ──► HTTP 308 redirect to /app/
+   ├── /app/*             ──► Frontend SPA (Static assets; SPA fallback to /app/index.html)
+   ├── /                  ──► Root handler (HTTP 307 to FALLBACK_URL if set, else 404)
+   ├── /:slug             ──► Redirection engine (D1 database lookup)
+   └── anything else      ──► Exact static asset if present (e.g. /favicon.ico), else 404 page
+```
+
+- **Reserved top-level paths:** Only `api` and `app` are reserved (case-insensitive).
+- **Slug format:** Single-segment `^[A-Za-z0-9_-]{1,64}$` (case-sensitive and mutable).
+- **Loop prevention:** Targets cannot redirect to the redirector host or configured `OWN_HOSTNAMES`.
+- **Query preservation:** Incoming query parameters are merged while preserving target parameters and encoding byte-for-byte.
+
+---
+
+## 1. Setup & Deployment
+
+### Prerequisites
+
+- Node.js 20+
+- `pnpm` (v10 or v11)
+- Cloudflare account with Wrangler authenticated (`pnpm --filter @redirect/api exec wrangler login`)
+
+### Installation
+
+Clone the repository and install workspace dependencies:
+
+```bash
+pnpm install
+```
+
+### Provision Cloudflare Resources
+
+1. **Create the D1 database:**
+
+   ```bash
+   pnpm --filter @redirect/api exec wrangler d1 create redirect-db
+   ```
+
+   Copy the returned `database_id`.
+
+2. **Create the KV namespace:**
+
+   ```bash
+   pnpm --filter @redirect/api exec wrangler kv namespace create AUTH_TOKENS
+   ```
+
+   Copy the returned namespace `id`.
+
+3. **Configure `apps/api/wrangler.jsonc`:**
+
+   Open `apps/api/wrangler.jsonc` and paste your IDs:
+
+   ```jsonc
+   "d1_databases": [
+     {
+       "binding": "DB",
+       "database_name": "redirect-db",
+       "database_id": "<PASTE_D1_DATABASE_ID_HERE>",
+       "migrations_dir": "migrations"
+     }
+   ],
+   "kv_namespaces": [
+     {
+       "binding": "AUTH_TOKENS",
+       "id": "<PASTE_KV_NAMESPACE_ID_HERE>"
+     }
+   ],
+   "routes": [
+     { "pattern": "go.yourdomain.com", "custom_domain": true }
+   ]
+   ```
+
+4. **Apply database migrations:**
+
+   - For remote production:
+
+     ```bash
+     pnpm db:migrate:remote
+     ```
+
+   - For local development:
+
+     ```bash
+     pnpm db:migrate:local
+     ```
+
+5. **Deploy the Worker:**
+
+   ```bash
+   pnpm deploy
+   ```
+
+---
+
+## 2. First Run & Obtaining Your Token
+
+Redirect employs a zero-lockout lazy bootstrapping mechanism for API authentication.
+
+### Bootstrapping the Initial Token
+
+1. Make an unauthenticated request to any API endpoint, or open `/app/`:
+
+   ```bash
+   curl -i https://<your-domain>/api/v1/auth/verify
+   ```
+
+   The API will respond with `401 Unauthorized`. This initial request triggers the Worker to automatically generate a secure 32-character Base62 token and store it in KV under the key `initial_token`.
+
+2. **Retrieve the token in production:**
+
+   - Log in to the [Cloudflare Dashboard](https://dash.cloudflare.com/).
+   - Navigate to **Storage & Databases** → **KV** → `AUTH_TOKENS`.
+   - View the value of the `initial_token` key and copy it.
+
+3. **Retrieve the token in local development (`pnpm dev`):**
+
+   ```bash
+   pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
+   ```
+
+### Authenticating API Calls
+
+Include the token in all API requests using either standard header:
+
+```bash
+# Using Authorization Bearer
+curl -H "Authorization: Bearer <your-token>" https://<your-domain>/api/v1/auth/verify
+
+# Or using X-API-Key
+curl -H "X-API-Key: <your-token>" https://<your-domain>/api/v1/auth/verify
+```
+
+---
+
+## 3. Recovery & Lockout Prevention
+
+The system is designed so that the owner can **never be locked out**:
+
+1. **Regenerating Initial Token:**
+
+   If you ever lose your tokens or revoke all keys, delete the `initial_token` key directly in the Cloudflare Dashboard (or via Wrangler KV). The very next unauthenticated API request will detect the absence and generate a brand-new `initial_token`.
+
+2. **Rotating Initial Token:**
+
+   Call the rotation endpoint with your existing token:
+
+   ```bash
+   curl -X POST https://<your-domain>/api/v1/tokens/initial/rotate \
+     -H "Authorization: Bearer <your-token>"
+   ```
+
+3. **Master `API_KEY` Secret:**
+
+   You can optionally configure a fixed secret token:
+
+   ```bash
+   pnpm --filter @redirect/api exec wrangler secret put API_KEY
+   ```
+
+   > **Note:** When `API_KEY` is configured, the dynamic `initial_token` mechanism is completely disabled and only the secret is accepted. Removing the secret re-enables `initial_token`.
+
+---
+
+## 4. Optional Cloudflare Zero Trust Hardening
+
+Cloudflare Zero Trust (Access) can be layered on top for additional security, but is **entirely optional**. The API and frontend are fully secured by token authentication on their own.
+
+### Recommended Configuration
+
+When configuring Cloudflare Access:
+
+- **Protect:** `/app/*` and `/api/*`
+- **Leave Public:** `/` and `/:slug` (public redirect matching)
+
+### Rules & Integration
+
+1. **Zero Trust Independence:** The Worker ignores Cloudflare Access headers and JWTs; it always requires a valid token on `/api/v1/*`.
+
+2. **Workers.dev Safety:** Ensure `workers_dev: false` and `preview_urls: false` in `wrangler.jsonc` so that requests cannot bypass Access path policies.
+
+3. **Automated Scripts & CLI:** When accessing `/api/*` behind Zero Trust, pass Access Service Token headers in addition to the bearer token:
+
+   ```bash
+   curl -H "CF-Access-Client-Id: <service-token-id>" \
+        -H "CF-Access-Client-Secret: <service-token-secret>" \
+        -H "Authorization: Bearer <api-token>" \
+        https://<your-domain>/api/v1/links
+   ```
+
+4. **Verification:**
+
+   - Unauthenticated `curl -i https://<your-domain>/app/` and `/api/v1/auth/verify` return an Access login redirect (302).
+   - Public short link `curl -i https://<your-domain>/<some-slug>` returns the 307 redirect immediately without prompting for Access.
+
+---
+
+## 5. Analytics & D1 Cost Budget
+
+Redirect stores analytics counters and daily rollups directly in Cloudflare D1. To maintain strict cost control on Cloudflare's serverless billing, **no per-click event table** is used, and counter columns are never indexed.
+
+### Billing & Write Budget
+
+Cloudflare D1 bills by **rows written** (Free tier: 100,000 writes/day; Paid Workers: 50M writes/month included, then \$1.00 per 1M writes).
+
+| Metric | Storage Target | Rows Written per Click | Default |
+| :--- | :--- | :--- | :--- |
+| **Total clicks & last clicked** | 2 unindexed columns on `links` row | 1 | **Enabled** |
+| **Clicks per UTC day** | `link_daily_clicks` (upserted by link ID and date) | 1 | **Enabled** |
+| **Daily clicks by country** | `link_daily_dims` (`dim = 'country'`) | +1 | Optional |
+| **Daily clicks by referrer host** | `link_daily_dims` (`dim = 'referrer'`) | +1 | Optional |
+
+### Usage & Cost Comparison
+
+| Configuration | Rows / Click | Free-Tier Clicks / Day | Paid Cost per 1M Clicks |
+| :--- | :--- | :--- | :--- |
+| **Default** (Total + Daily rollup) | **2** | **~50,000** | **\$2.00** |
+| **+ Country** | **3** | **~33,000** | **\$3.00** |
+| **+ Country & Referrer** | **4** | **~25,000** | **\$4.00** |
+
+### Enabling Optional Dimensions
+
+In `apps/api/wrangler.jsonc` (or via Cloudflare Dashboard environment variables):
+
+```jsonc
+"vars": {
+  "ANALYTICS_ENABLED": "true",
+  "ANALYTICS_DIMENSIONS": "country,referrer"
+}
+```
+
+- `country`: Derived from Cloudflare request metadata (`request.cf.country`). Defaults to `"XX"`.
+- `referrer`: Stores **only the sanitized hostname** of the `Referer` header (e.g., `twitter.com`), or `"(direct)"`. Full URLs with query parameters or tokens are stripped.
+
+### Reliability
+
+Analytics writes run inside `ctx.waitUntil()` as a single non-blocking batch. If D1 limits are reached or an analytics query fails, the redirect response is unaffected.
+
+---
+
+## 6. Backups & Disaster Recovery
+
+Because Redirect uses standard Cloudflare D1 SQLite storage, backups and point-in-time recovery do not require custom API endpoints:
+
+1. **Export Database to SQL:**
+
+   ```bash
+   pnpm --filter @redirect/api exec wrangler d1 export redirect-db --remote --output=./backup.sql
+   ```
+
+2. **D1 Time Travel (Point-in-Time Recovery):**
+
+   D1 supports rolling back database state up to 30 days:
+
+   ```bash
+   # View bookmark timestamps
+   pnpm --filter @redirect/api exec wrangler d1 time-travel info redirect-db --remote
+
+   # Restore database to a specific bookmark
+   pnpm --filter @redirect/api exec wrangler d1 time-travel restore redirect-db --remote --bookmark=<bookmark-id>
+   ```
+
+---
+
+## 7. Known Limitations & Design Trade-offs
+
+- **Single Domain / Single User:** Designed for individual users and private homelabs. Multi-tenant isolation is not implemented.
+- **Eventual Consistency of Tokens:** Workers KV propagates updates globally within approximately 60 seconds. Newly created or revoked tokens may take up to a minute to reflect across all edge locations.
+- **Bot Detection Heuristic:** Non-GET methods, prefetch/prerender headers (`Sec-Purpose`, `Purpose`), and common crawler User-Agents are excluded from click counts. However, crawlers that disguise their User-Agent may still register clicks.
+- **Slug Renaming & Aliasing:** Links can have their slugs renamed at any time. When a slug is changed, the old slug is immediately freed and returns 404. No automatic alias forwarding is maintained.
+- **Permanent Redirects (301 / 308) Caching:** Permanent redirect status codes carry `Cache-Control: private, max-age=3600`. Visitors' browsers will cache the target, which prevents repeated clicks from reaching the Worker and being counted. Use the default temporary redirect (`307`) unless permanent redirection is specifically required.
+
+---
+
+## 8. Development & Testing
+
+```bash
+# Run TypeScript typechecks
+pnpm typecheck
+
+# Run test suite (Vitest + real Workers runtime via workerd)
+pnpm test
+
+# Run local development server
+pnpm dev
+```
