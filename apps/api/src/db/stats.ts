@@ -31,31 +31,27 @@ export async function getLinkStats(
     clicks: Number(r.clicks),
   }));
 
-  let dimensions: LinkStats["dimensions"] = undefined;
+  const dimensions: Record<string, Array<{ value: string; clicks: number }>> = {};
 
-  if (enabledDimensions.length > 0) {
-    dimensions = {};
+  for (const dim of enabledDimensions) {
+    if (dim === "country" || dim === "referrer") {
+      const dimSql = `
+        SELECT value, SUM(clicks) as clicks
+        FROM link_daily_dims
+        WHERE link_id = ? AND dim = ? AND day >= ? AND day <= ?
+        GROUP BY value
+        ORDER BY clicks DESC
+        LIMIT 10
+      `;
+      const { results: dimResults } = await db
+        .prepare(dimSql)
+        .bind(linkId, dim, fromStr, toStr)
+        .all<{ value: string; clicks: number }>();
 
-    for (const dim of enabledDimensions) {
-      if (dim === "country" || dim === "referrer") {
-        const dimSql = `
-          SELECT value, SUM(clicks) as clicks
-          FROM link_daily_dims
-          WHERE link_id = ? AND dim = ? AND day >= ? AND day <= ?
-          GROUP BY value
-          ORDER BY clicks DESC
-          LIMIT 10
-        `;
-        const { results: dimResults } = await db
-          .prepare(dimSql)
-          .bind(linkId, dim, fromStr, toStr)
-          .all<{ value: string; clicks: number }>();
-
-        dimensions[dim] = dimResults.map((r) => ({
-          value: r.value,
-          clicks: Number(r.clicks),
-        }));
-      }
+      dimensions[dim] = dimResults.map((r) => ({
+        value: r.value,
+        clicks: Number(r.clicks),
+      }));
     }
   }
 
@@ -69,6 +65,6 @@ export async function getLinkStats(
       to: toStr,
     },
     daily,
-    ...(dimensions !== undefined ? { dimensions } : {}),
+    dimensions,
   };
 }
