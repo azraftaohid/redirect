@@ -23,9 +23,8 @@ export function AccessExpiredBanner(): React.ReactElement | null {
       <div className="flex items-center gap-2 shrink-0">
         <Button
           size="sm"
-          variant="outline"
           onClick={handleReload}
-          className="bg-white text-zinc-950 hover:bg-zinc-100 border-none shadow-xs text-xs font-semibold h-7 px-2.5 gap-1.5"
+          className="bg-white text-zinc-950 hover:bg-zinc-100 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 border-none shadow-xs text-xs font-semibold h-7 px-2.5 gap-1.5"
         >
           <RefreshCw className="w-3.5 h-3.5" />
           <span>Reload</span>

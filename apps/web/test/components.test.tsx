@@ -101,8 +101,12 @@ describe("AuthGate & AccessExpiredBanner", () => {
     const msg = await screen.findByText(/session may have expired or the server is unreachable/i);
     expect(msg).toBeInTheDocument();
 
-    // Reload button should be present
-    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+    // Reload button should be present with proper high-contrast styling
+    const reloadBtn = screen.getByRole("button", { name: /reload/i });
+    expect(reloadBtn).toBeInTheDocument();
+    expect(reloadBtn.className).toContain("bg-white");
+    expect(reloadBtn.className).toContain("dark:bg-white");
+    expect(reloadBtn.className).toContain("text-zinc-950");
 
     // Dismiss button should dismiss banner
     const dismissBtn = screen.getByRole("button", { name: /dismiss banner/i });
