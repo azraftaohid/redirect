@@ -101,9 +101,10 @@ export const updateLinkSchema = z
 export type UpdateLinkInput = z.infer<typeof updateLinkSchema>;
 
 export const listLinksQuerySchema = z.object({
-  search: z.string().optional(),
-  tag: z.string().optional(),
+  search: z.string().max(200).optional(),
+  tag: z.string().max(MAX_TAG_LENGTH).optional(),
   slug: z.string().optional(),
+  targetUrl: z.string().optional(),
   isActive: z.enum(["true", "false"]).optional(),
   sortBy: z.enum(["createdAt", "updatedAt", "clickCount", "slug"]).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
@@ -148,19 +149,22 @@ export interface TokenInfo {
   isInitial?: boolean;
 }
 
+export interface DimRow {
+  value: string;
+  clicks: number;
+}
+
 export interface LinkStats {
-  linkId: string;
-  totalClicks: number;
-  lastClickedAt: string | null;
+  link: LinkRecord;
   range: {
     days: number;
     from: string;
     to: string;
   };
   daily: Array<{ day: string; clicks: number }>;
-  dimensions?: {
-    country?: Array<{ value: string; clicks: number }>;
-    referrer?: Array<{ value: string; clicks: number }>;
+  dimensions: {
+    country?: DimRow[];
+    referrer?: DimRow[];
   };
 }
 

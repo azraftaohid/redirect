@@ -179,7 +179,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-zinc-800 dark:text-zinc-200">2. Production Cloudflare KV</p>
                     <p className="text-xs mt-0.5">
-                      In Cloudflare Dashboard &gt; Storage &amp; Databases &gt; KV &gt; <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">AUTH_TOKENS</code>, check the key <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">initial_token</code> (or any <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">token:*</code> key) to view its plaintext value.
+                      In Cloudflare Dashboard &gt; Storage &amp; Databases &gt; KV &gt; <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">AUTH_TOKENS</code>, your token is the value of the <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">initial_token</code> key (or of any <code className="bg-zinc-200 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">token:&lt;id&gt;</code> key).
                     </p>
                   </div>
                 </div>

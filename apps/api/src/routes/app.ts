@@ -2,9 +2,10 @@ import type { Env } from "../types.js";
 
 export const APP_SECURITY_HEADERS = {
   "Content-Security-Policy":
-    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
+  "X-Robots-Tag": "noindex, nofollow",
 } as const;
 
 /**
@@ -52,23 +53,24 @@ export async function serveApp(request: Request, env: Env): Promise<Response> {
     return renderNotFound(request, env);
   }
 
-  let res = await env.ASSETS.fetch(request);
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
   const lastSegment = segments.length > 0 ? segments[segments.length - 1]! : "";
 
-  if (
-    res.status === 404 &&
-    (request.method === "GET" || request.method === "HEAD") &&
-    !lastSegment.includes(".")
-  ) {
+  let res: Response;
+  if (url.pathname === "/app/") {
     const indexReq = new Request(new URL("/app/index.html", request.url), request);
-    const indexRes = await env.ASSETS.fetch(indexReq);
-    res = new Response(indexRes.body, {
-      status: 200,
-      statusText: "OK",
-      headers: indexRes.headers,
-    });
+    res = await env.ASSETS.fetch(indexReq);
+  } else {
+    res = await env.ASSETS.fetch(request);
+    if (
+      res.status === 404 &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      !lastSegment.includes(".")
+    ) {
+      const indexReq = new Request(new URL("/app/index.html", request.url), request);
+      res = await env.ASSETS.fetch(indexReq);
+    }
   }
 
   const headers = new Headers(res.headers);
@@ -86,6 +88,14 @@ export async function serveApp(request: Request, env: Env): Promise<Response> {
     !lastSegment.includes(".")
   ) {
     headers.set("Cache-Control", "no-cache");
+  }
+
+  if (res.status === 304) {
+    return new Response(null, {
+      status: 304,
+      statusText: res.statusText,
+      headers,
+    });
   }
 
   return new Response(res.body, {

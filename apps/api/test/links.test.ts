@@ -257,7 +257,16 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
     expect(slugBody.data).toHaveLength(1);
     expect(slugBody.data[0].slug).toBe("article");
 
-    // 4. Pagination
+    // 4. Exact targetUrl filter (R3.1 / R5.9)
+    const targetUrlRes = await SELF.fetch(
+      "https://redirect.example.com/api/v1/links?targetUrl=https://example.com/docs",
+      { headers: authHeaders() }
+    );
+    const targetUrlBody = (await targetUrlRes.json()) as any;
+    expect(targetUrlBody.data).toHaveLength(1);
+    expect(targetUrlBody.data[0].slug).toBe("manual_v1");
+
+    // 5. Pagination
     const pageRes = await SELF.fetch(
       "https://redirect.example.com/api/v1/links?limit=2&offset=0",
       { headers: authHeaders() }
@@ -268,7 +277,7 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
     expect(pageBody.pagination.hasMore).toBe(true);
   });
 
-  it("updates link fields via PATCH and allows clearing expiry with null", async () => {
+  it("updates link fields via PATCH, allows clearing expiry, and edits expired link title without error (B6/B7)", async () => {
     const createRes = await SELF.fetch("https://redirect.example.com/api/v1/links", {
       method: "POST",
       headers: authHeaders(),
@@ -285,6 +294,7 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
     const link = (await createRes.json()) as any;
     expect(link.expiresAt).not.toBeNull();
 
+    // 1. Clear expiry and tags
     const patchRes = await SELF.fetch(
       `https://redirect.example.com/api/v1/links/${link.id}`,
       {
@@ -294,7 +304,7 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
           statusCode: 301,
           isActive: false,
           forwardQuery: false,
-          tags: ["v2", "archived"],
+          tags: [],
           expiresAt: null,
         }),
       }
@@ -304,8 +314,28 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
     expect(updated.statusCode).toBe(301);
     expect(updated.isActive).toBe(false);
     expect(updated.forwardQuery).toBe(false);
-    expect(updated.tags).toEqual(["v2", "archived"]);
+    expect(updated.tags).toEqual([]);
     expect(updated.expiresAt).toBeNull();
+
+    // 2. Simulate expired link in D1
+    await env.DB.prepare("UPDATE links SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?")
+      .bind(link.id)
+      .run();
+
+    // 3. Edit title without touching expiresAt - must succeed (B6)
+    const editTitleRes = await SELF.fetch(
+      `https://redirect.example.com/api/v1/links/${link.id}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          title: "New Title on Expired Link",
+        }),
+      }
+    );
+    expect(editTitleRes.status).toBe(200);
+    const titleUpdated = (await editTitleRes.json()) as any;
+    expect(titleUpdated.title).toBe("New Title on Expired Link");
   });
 
   it("deletes a link and cascades deletion of analytics rollups", async () => {
@@ -358,7 +388,29 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
     expect(dimsCount?.c).toBe(0);
   });
 
-  it("queries link stats via GET /api/v1/links/:id/stats", async () => {
+  it("returns 404 on deleting non-existent link", async () => {
+    const delRes = await SELF.fetch(
+      "https://redirect.example.com/api/v1/links/non-existent-id",
+      {
+        method: "DELETE",
+        headers: authHeaders(),
+      }
+    );
+    expect(delRes.status).toBe(404);
+  });
+
+  it("maps malformed JSON to 400 bad_request (B4)", async () => {
+    const res = await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      method: "POST",
+      headers: authHeaders(),
+      body: "{ malformed json",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe("bad_request");
+  });
+
+  it("queries link stats via GET /api/v1/links/:id/stats returning embedded link record (R3.5)", async () => {
     const createRes = await SELF.fetch("https://redirect.example.com/api/v1/links", {
       method: "POST",
       headers: authHeaders(),
@@ -389,11 +441,20 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
     );
     expect(statsRes.status).toBe(200);
     const stats = (await statsRes.json()) as any;
-    expect(stats.linkId).toBe(link.id);
-    expect(stats.totalClicks).toBe(50);
-    expect(stats.lastClickedAt).toBe("2026-10-25T12:00:00.000Z");
+    expect(stats.link).toBeDefined();
+    expect(stats.link.id).toBe(link.id);
+    expect(stats.link.clickCount).toBe(50);
+    expect(stats.link.lastClickedAt).toBe("2026-10-25T12:00:00.000Z");
     expect(stats.range.days).toBe(7);
     expect(stats.daily).toHaveLength(1);
     expect(stats.daily[0]).toEqual({ day: today, clicks: 50 });
+  });
+
+  it("returns 404 for stats on non-existent link", async () => {
+    const statsRes = await SELF.fetch(
+      "https://redirect.example.com/api/v1/links/non-existent-id/stats?days=7",
+      { headers: authHeaders() }
+    );
+    expect(statsRes.status).toBe(404);
   });
 });

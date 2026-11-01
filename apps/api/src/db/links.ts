@@ -66,6 +66,11 @@ export async function listLinks(
     params.push(query.slug);
   }
 
+  if (query.targetUrl && query.targetUrl.trim().length > 0) {
+    conditions.push("target_url = ?");
+    params.push(query.targetUrl.trim());
+  }
+
   if (query.isActive !== undefined) {
     conditions.push("is_active = ?");
     params.push(query.isActive === "true" ? 1 : 0);
@@ -75,8 +80,7 @@ export async function listLinks(
 
   // Count total query
   const countSql = `SELECT COUNT(*) as total FROM links ${whereClause}`;
-  const countRes = await db.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countRes?.total ?? 0;
+  const countStmt = db.prepare(countSql).bind(...params);
 
   // Sorting
   const sortCol = SORT_COLUMN_MAP[query.sortBy] ?? "created_at";
@@ -90,8 +94,12 @@ export async function listLinks(
     LIMIT ? OFFSET ?
   `;
   const dataParams = [...params, query.limit, query.offset];
-  const { results } = await db.prepare(dataSql).bind(...dataParams).all<Record<string, unknown>>();
+  const dataStmt = db.prepare(dataSql).bind(...dataParams);
 
+  // Single round-trip using batch
+  const [countRes, dataRes] = await db.batch([countStmt, dataStmt]);
+  const total = (countRes?.results?.[0] as { total?: number } | undefined)?.total ?? 0;
+  const results = (dataRes?.results ?? []) as Record<string, unknown>[];
   const data = results.map(mapRowToLinkRecord);
 
   return {
@@ -117,24 +125,12 @@ export async function getLinkById(db: D1Database, id: string): Promise<LinkRecor
   return mapRowToLinkRecord(row);
 }
 
-export async function getLinkBySlug(db: D1Database, slug: string): Promise<LinkRecord | null> {
-  const row = await db
-    .prepare("SELECT * FROM links WHERE slug = ? LIMIT 1")
-    .bind(slug)
-    .first<Record<string, unknown>>();
-
-  if (!row) {
-    return null;
-  }
-  return mapRowToLinkRecord(row);
-}
-
 export async function createLinkRecord(
   db: D1Database,
   id: string,
   slug: string,
   input: CreateLinkInput
-): Promise<LinkRecord> {
+): Promise<LinkRecord | null> {
   const now = new Date().toISOString();
   const statusCode = input.statusCode ?? DEFAULT_STATUS_CODE;
   const tagsJson = JSON.stringify(input.tags ?? []);
@@ -143,11 +139,14 @@ export async function createLinkRecord(
   const expiresAt = input.expiresAt ? new Date(input.expiresAt).toISOString() : null;
   const title = input.title ?? null;
 
-  await db
+  const row = await db
     .prepare(
       `INSERT INTO links (
-        id, slug, target_url, title, status_code, tags, is_active, forward_query, expires_at, click_count, last_clicked_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`
+        id, slug, target_url, title, status_code, tags, is_active, forward_query,
+        expires_at, click_count, last_clicked_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+      ON CONFLICT(slug) DO NOTHING
+      RETURNING *`
     )
     .bind(
       id,
@@ -162,35 +161,25 @@ export async function createLinkRecord(
       now,
       now
     )
-    .run();
+    .first<Record<string, unknown>>();
 
-  return {
-    id,
-    slug,
-    targetUrl: input.targetUrl,
-    title,
-    statusCode,
-    tags: input.tags ?? [],
-    isActive: isActive === 1,
-    forwardQuery: forwardQuery === 1,
-    expiresAt,
-    clickCount: 0,
-    lastClickedAt: null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  if (!row) {
+    return null;
+  }
+
+  return mapRowToLinkRecord(row);
 }
 
 export async function updateLinkRecord(
   db: D1Database,
-  existing: LinkRecord,
+  id: string,
   input: UpdateLinkInput
-): Promise<LinkRecord> {
+): Promise<LinkRecord | null> {
   const now = new Date().toISOString();
   const updates: string[] = ["updated_at = ?"];
   const params: unknown[] = [now];
 
-  if (input.slug !== undefined && input.slug !== existing.slug) {
+  if (input.slug !== undefined) {
     updates.push("slug = ?");
     params.push(input.slug);
   }
@@ -230,16 +219,14 @@ export async function updateLinkRecord(
     params.push(input.expiresAt ? new Date(input.expiresAt).toISOString() : null);
   }
 
-  params.push(existing.id);
+  params.push(id);
 
-  const sql = `UPDATE links SET ${updates.join(", ")} WHERE id = ?`;
-  await db.prepare(sql).bind(...params).run();
-
-  const updated = await getLinkById(db, existing.id);
-  if (!updated) {
-    throw new Error("Failed to retrieve updated link record.");
+  const sql = `UPDATE links SET ${updates.join(", ")} WHERE id = ? RETURNING *`;
+  const row = await db.prepare(sql).bind(...params).first<Record<string, unknown>>();
+  if (!row) {
+    return null;
   }
-  return updated;
+  return mapRowToLinkRecord(row);
 }
 
 export async function deleteLinkRecord(db: D1Database, id: string): Promise<boolean> {

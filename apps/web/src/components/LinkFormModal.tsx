@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import type { CreateLinkInput, LinkRecord, UpdateLinkInput } from "@redirect/shared";
-import { generateRandomSlug } from "@redirect/shared";
+import {
+  DEFAULT_SLUG_LENGTH,
+  generateValidRandomSlug,
+  validateSlug,
+  validateTargetUrl,
+} from "@redirect/shared";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +22,7 @@ import {
   toLocalDatetimeInputValue,
   fromLocalDatetimeInputValue,
 } from "@/utils/dates";
+import { normalizeUrlInput } from "@/utils/url";
 import { createLink, updateLink } from "@/api/client";
 import {
   AlertTriangle,
@@ -47,7 +53,7 @@ export function LinkFormModal({
   const [title, setTitle] = useState("");
   const [statusCode, setStatusCode] = useState<301 | 302 | 307 | 308>(307);
   const [isActive, setIsActive] = useState(true);
-  const [forwardQuery, setForwardQuery] = useState(false);
+  const [forwardQuery, setForwardQuery] = useState(true);
   const [expiresAt, setExpiresAt] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -71,7 +77,7 @@ export function LinkFormModal({
         setTitle("");
         setStatusCode(307);
         setIsActive(true);
-        setForwardQuery(false);
+        setForwardQuery(true);
         setExpiresAt("");
         setTags([]);
       }
@@ -103,34 +109,35 @@ export function LinkFormModal({
   }
 
   function handleGenerateSlug() {
-    setSlug(generateRandomSlug(8));
+    setSlug(generateValidRandomSlug(DEFAULT_SLUG_LENGTH));
   }
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
 
-    let target = targetUrl.trim();
-    if (!target) {
+    const normalizedTarget = normalizeUrlInput(targetUrl);
+    if (!normalizedTarget) {
       errs.targetUrl = "Target URL is required";
     } else {
-      if (!/^https?:\/\//i.test(target)) {
-        target = "https://" + target;
-        setTargetUrl(target);
-      }
-      try {
-        new URL(target);
-      } catch {
-        errs.targetUrl = "Invalid URL format";
+      const ownHostnames = typeof window !== "undefined" ? [window.location.hostname] : [];
+      const validation = validateTargetUrl(normalizedTarget, ownHostnames);
+      if (!validation.ok) {
+        errs.targetUrl = validation.error;
       }
     }
 
     if (slug.trim()) {
-      if (!/^[a-zA-Z0-9_-]+$/.test(slug.trim())) {
-        errs.slug = "Slug can only contain letters, numbers, hyphens, and underscores";
+      const slugValidation = validateSlug(slug.trim());
+      if (!slugValidation.ok) {
+        errs.slug = slugValidation.error;
       }
     }
 
-    if (expiresAt) {
+    // Only validate future expiry if it was changed (or in create mode)
+    const initialLocalExpiry = initialLink ? toLocalDatetimeInputValue(initialLink.expiresAt) : "";
+    const expiryChanged = !isEditing || expiresAt !== initialLocalExpiry;
+
+    if (expiryChanged && expiresAt) {
       const e = new Date(expiresAt).getTime();
       if (e <= Date.now()) {
         errs.expiresAt = "Expiration date must be in the future";
@@ -145,39 +152,89 @@ export function LinkFormModal({
     e.preventDefault();
     if (!validate()) return;
 
-    setSubmitting(true);
+    const normalizedTarget = normalizeUrlInput(targetUrl);
 
-    let target = targetUrl.trim();
-    if (!/^https?:\/\//i.test(target)) {
-      target = "https://" + target;
-    }
+    if (isEditing && initialLink) {
+      // Diff-based PATCH (R4.3)
+      const updates: UpdateLinkInput = {};
 
-    const payload: CreateLinkInput = {
-      targetUrl: target,
-      slug: slug.trim() ? slug.trim() : undefined,
-      title: title.trim() ? title.trim() : null,
-      statusCode,
-      isActive,
-      forwardQuery,
-      expiresAt: fromLocalDatetimeInputValue(expiresAt) ?? null,
-      tags: tags.length > 0 ? tags : undefined,
-    };
-
-    try {
-      let result: LinkRecord;
-      if (isEditing && initialLink) {
-        result = await updateLink(initialLink.id, payload as UpdateLinkInput);
-        toast.success(`Updated link /${result.slug}`);
-      } else {
-        result = await createLink(payload);
-        toast.success(`Created short link /${result.slug}`);
+      if (normalizedTarget !== initialLink.targetUrl) {
+        updates.targetUrl = normalizedTarget;
       }
-      onSuccess(result);
-      onClose();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save link");
-    } finally {
-      setSubmitting(false);
+
+      if (slug.trim() !== initialLink.slug) {
+        updates.slug = slug.trim();
+      }
+
+      const cleanTitle = title.trim() || null;
+      if (cleanTitle !== (initialLink.title || null)) {
+        updates.title = cleanTitle;
+      }
+
+      if (statusCode !== initialLink.statusCode) {
+        updates.statusCode = statusCode;
+      }
+
+      if (isActive !== initialLink.isActive) {
+        updates.isActive = isActive;
+      }
+
+      if (forwardQuery !== initialLink.forwardQuery) {
+        updates.forwardQuery = forwardQuery;
+      }
+
+      const initialLocalExpiry = toLocalDatetimeInputValue(initialLink.expiresAt);
+      if (expiresAt !== initialLocalExpiry) {
+        updates.expiresAt = fromLocalDatetimeInputValue(expiresAt) ?? null;
+      }
+
+      const initialTagsSorted = [...(initialLink.tags || [])].sort();
+      const currentTagsSorted = [...tags].sort();
+      if (JSON.stringify(initialTagsSorted) !== JSON.stringify(currentTagsSorted)) {
+        updates.tags = tags;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        toast.info("No changes to save");
+        onClose();
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        const result = await updateLink(initialLink.id, updates);
+        toast.success(`Updated link /${result.slug}`);
+        onSuccess(result);
+        onClose();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to update link");
+      } finally {
+        setSubmitting(false);
+      }
+    } else {
+      // Create mode
+      const payload: CreateLinkInput = {
+        targetUrl: normalizedTarget,
+        slug: slug.trim() ? slug.trim() : undefined,
+        title: title.trim() ? title.trim() : null,
+        statusCode,
+        isActive,
+        forwardQuery,
+        expiresAt: fromLocalDatetimeInputValue(expiresAt) ?? null,
+        tags: tags.length > 0 ? tags : undefined,
+      };
+
+      setSubmitting(true);
+      try {
+        const result = await createLink(payload);
+        toast.success(`Created short link /${result.slug}`);
+        onSuccess(result);
+        onClose();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to create link");
+      } finally {
+        setSubmitting(false);
+      }
     }
   }
 
@@ -203,17 +260,20 @@ export function LinkFormModal({
           {/* Target URL */}
           <div className="space-y-1.5">
             <Label htmlFor="link-target-url">
-              Target URL <span className="text-red-500">*</span>
+              Destination URL <span className="text-red-500">*</span>
             </Label>
             <Input
               id="link-target-url"
               type="text"
-              placeholder="https://example.com/my-destination"
+              placeholder="https://example.com/long-page-url"
               value={targetUrl}
               onChange={(e) => setTargetUrl(e.target.value)}
               disabled={submitting}
+              className="font-mono text-xs"
             />
-            {errors.targetUrl && <p className="text-xs text-red-500 font-medium">{errors.targetUrl}</p>}
+            {errors.targetUrl && (
+              <p className="text-xs text-red-500 font-medium">{errors.targetUrl}</p>
+            )}
           </div>
 
           {/* Title */}
@@ -259,6 +319,7 @@ export function LinkFormModal({
                 placeholder="random8chars"
                 value={slug}
                 onChange={(e) => setSlug(e.target.value)}
+                maxLength={64}
                 disabled={submitting}
                 className="pl-7 font-mono"
               />
@@ -269,7 +330,7 @@ export function LinkFormModal({
               <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-sm">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
                 <span>
-                  Changing this slug will invalidate existing QR codes and external links referencing <code>/{initialLink?.slug}</code>.
+                  Renaming frees <code>/{initialLink?.slug}</code> immediately. The old link will return 404 (no alias is kept). Statistics are preserved.
                 </span>
               </div>
             )}
@@ -301,32 +362,32 @@ export function LinkFormModal({
             )}
           </div>
 
-          {/* Active Switch & Forward Query Switch */}
-          <div className="space-y-3 py-2 border-y border-zinc-100 dark:border-zinc-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label htmlFor="link-active-switch" className="font-semibold">Link Status</Label>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  {isActive ? "Link is active and redirecting visitors." : "Link is inactive and will return 404."}
-                </p>
+          {/* Options: Is Active & Forward Query */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+            <div className="flex items-center justify-between p-3 rounded-lg border border-zinc-200 dark:border-zinc-800">
+              <div className="space-y-0.5">
+                <Label htmlFor="link-active" className="text-sm font-medium cursor-pointer">
+                  Link Active
+                </Label>
+                <p className="text-xs text-zinc-500">Uncheck to temporarily disable redirection</p>
               </div>
               <Switch
-                id="link-active-switch"
+                id="link-active"
                 checked={isActive}
                 onCheckedChange={setIsActive}
                 disabled={submitting}
               />
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-zinc-800/50">
-              <div>
-                <Label htmlFor="link-forward-query-switch" className="font-semibold">Forward Query Parameters</Label>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Pass search parameters (e.g. <code>?utm_source=...</code>) directly to destination URL.
-                </p>
+            <div className="flex items-center justify-between p-3 rounded-lg border border-zinc-200 dark:border-zinc-800">
+              <div className="space-y-0.5">
+                <Label htmlFor="link-forward-query" className="text-sm font-medium cursor-pointer">
+                  Forward Query Params
+                </Label>
+                <p className="text-xs text-zinc-500">Append UTM and incoming query params</p>
               </div>
               <Switch
-                id="link-forward-query-switch"
+                id="link-forward-query"
                 checked={forwardQuery}
                 onCheckedChange={setForwardQuery}
                 disabled={submitting}
@@ -334,37 +395,22 @@ export function LinkFormModal({
             </div>
           </div>
 
-          {/* Expiration Datetime */}
-          <div className="space-y-1.5">
-            <Label htmlFor="link-expires-at">
-              Expiration Date &amp; Time <span className="text-zinc-400 font-normal">(optional)</span>
-            </Label>
-            <Input
-              id="link-expires-at"
-              type="datetime-local"
-              value={expiresAt}
-              onChange={(e) => setExpiresAt(e.target.value)}
-              disabled={submitting}
-              className="text-sm h-10"
-            />
-            {errors.expiresAt && <p className="text-xs text-red-500 font-medium">{errors.expiresAt}</p>}
-          </div>
-
           {/* Tags */}
           <div className="space-y-1.5">
-            <Label htmlFor="link-tags">Tags</Label>
-            <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 min-h-10">
+            <Label htmlFor="link-tags">
+              Tags <span className="text-zinc-400 font-normal">(press enter or comma to add)</span>
+            </Label>
+            <div className="flex flex-wrap items-center gap-1.5 p-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg min-h-10">
               {tags.map((t) => (
                 <span
                   key={t}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs font-medium"
                 >
                   #{t}
                   <button
                     type="button"
                     onClick={() => handleRemoveTag(t)}
-                    className="hover:text-red-500 focus:outline-none"
-                    aria-label={`Remove tag ${t}`}
+                    className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -373,15 +419,32 @@ export function LinkFormModal({
               <input
                 id="link-tags"
                 type="text"
-                placeholder={tags.length === 0 ? "Add tags (press Enter or comma)..." : "Add more..."}
+                placeholder={tags.length === 0 ? "e.g. marketing, social" : ""}
                 value={tagInput}
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={handleTagKeyDown}
-                onBlur={() => handleAddTag(tagInput)}
-                disabled={submitting}
-                className="flex-1 min-w-[120px] bg-transparent text-sm focus:outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                disabled={submitting || tags.length >= 10}
+                className="flex-1 min-w-[120px] bg-transparent text-sm focus:outline-none"
               />
             </div>
+          </div>
+
+          {/* Expiration Date */}
+          <div className="space-y-1.5">
+            <Label htmlFor="link-expires">
+              Expiration Date <span className="text-zinc-400 font-normal">(optional)</span>
+            </Label>
+            <Input
+              id="link-expires"
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+              disabled={submitting}
+              className="text-xs"
+            />
+            {errors.expiresAt && (
+              <p className="text-xs text-red-500 font-medium">{errors.expiresAt}</p>
+            )}
           </div>
 
           <DialogFooter className="pt-2">
@@ -396,7 +459,7 @@ export function LinkFormModal({
             <Button type="submit" disabled={submitting}>
               {submitting ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
                   <span>Saving...</span>
                 </>
               ) : (

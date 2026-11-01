@@ -4,6 +4,7 @@ import { listLinks, createLink } from "@/api/client";
 import { LinkRow } from "@/components/LinkRow";
 import { LinkFormModal } from "@/components/LinkFormModal";
 import { QrCodeModal } from "@/components/QrCodeModal";
+import { normalizeUrlInput } from "@/utils/url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -144,12 +145,8 @@ export function DashboardPage(): React.ReactElement {
   // Quick shorten submit
   async function handleQuickShorten(e: React.FormEvent) {
     e.preventDefault();
-    let target = quickUrl.trim();
+    const target = normalizeUrlInput(quickUrl);
     if (!target) return;
-
-    if (!/^https?:\/\//i.test(target)) {
-      target = "https://" + target;
-    }
 
     try {
       new URL(target);
@@ -161,7 +158,24 @@ export function DashboardPage(): React.ReactElement {
     setQuickShortening(true);
     try {
       const created = await createLink({ targetUrl: target });
-      toast.success(`Created short link /${created.slug}`);
+      const fullShortUrl =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/${created.slug}`
+          : `/${created.slug}`;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(fullShortUrl);
+        copied = true;
+      } catch {
+        // clipboard write may fail if document not focused
+      }
+
+      toast.success(copied ? `Created /${created.slug} — copied` : `Created /${created.slug}`, {
+        action: {
+          label: "QR",
+          onClick: () => setQrModalLink(created),
+        },
+      });
       setQuickUrl("");
       fetchLinks();
     } catch (err) {
@@ -185,12 +199,18 @@ export function DashboardPage(): React.ReactElement {
     setQrModalLink(link);
   }
 
-  function handleLinkUpdated(_saved: LinkRecord) {
-    fetchLinks();
+  function handleLinkUpdated(saved: LinkRecord) {
+    setLinks((prev) => prev.map((l) => (l.id === saved.id ? saved : l)));
   }
 
   function handleLinkDeleted(id: string) {
-    setLinks((prev) => prev.filter((l) => l.id !== id));
+    setLinks((prev) => {
+      const next = prev.filter((l) => l.id !== id);
+      if (next.length === 0 && page > 1) {
+        setPage((p) => p - 1);
+      }
+      return next;
+    });
     setTotalCount((prev) => Math.max(0, prev - 1));
   }
 
@@ -262,6 +282,7 @@ export function DashboardPage(): React.ReactElement {
           />
           {search && (
             <button
+              aria-label="Clear search"
               onClick={() => {
                 setSearch("");
                 setDebouncedSearch("");
@@ -303,6 +324,7 @@ export function DashboardPage(): React.ReactElement {
           >
             <option value="createdAt:desc">Newest First</option>
             <option value="createdAt:asc">Oldest First</option>
+            <option value="updatedAt:desc">Recently Updated</option>
             <option value="clickCount:desc">Most Clicks</option>
             <option value="slug:asc">Slug (A-Z)</option>
           </select>
@@ -368,6 +390,10 @@ export function DashboardPage(): React.ReactElement {
               onDelete={handleLinkDeleted}
               onOpenEdit={handleOpenEditModal}
               onOpenQr={handleOpenQrModal}
+              onTagClick={(t) => {
+                setTag(t);
+                setPage(1);
+              }}
             />
           ))
         )}

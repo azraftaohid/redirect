@@ -1,11 +1,22 @@
 import type { Env } from "../types.js";
 
+export type AnalyticsDimension = "country" | "referrer";
+
 export const BOT_UA_REGEX =
-  /bot|crawl|spider|slurp|preview|facebookexternalhit|facebot|slackbot|whatsapp|telegrambot|discordbot|linkedinbot|embedly|skypeuripreview/i;
+  /bot|crawl|spider|slurp|preview|facebookexternalhit|facebot|slackbot|whatsapp|telegrambot|discordbot|linkedinbot|embedly|skypeuripreview|mastodon|pleroma|akkoma|misskey|friendica|http\.rb|curl|wget|python-requests|python-urllib|go-http-client|okhttp|axios|node-fetch|undici|libwww-perl|headlesschrome|lighthouse|uptimerobot|pingdom|statuscake|meta-externalagent|google-inspectiontool|googleother|iframely/i;
+
+export function parseEnabledDimensions(raw?: string): AnalyticsDimension[] {
+  if (!raw) return [];
+  const validDims: AnalyticsDimension[] = ["country", "referrer"];
+  return raw
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter((d): d is AnalyticsDimension => validDims.includes(d as AnalyticsDimension));
+}
 
 /**
  * Determines if a request should be counted as a real user click.
- * Filter out non-GET requests, prefetch/prerender requests, and known bots/crawlers.
+ * Filter out non-GET requests, prefetch/prerender requests, empty user agents, and known bots/crawlers.
  */
 export function isCountableClick(request: Request): boolean {
   if (request.method !== "GET") {
@@ -18,7 +29,11 @@ export function isCountableClick(request: Request): boolean {
     return false;
   }
 
-  const ua = request.headers.get("user-agent") ?? "";
+  const ua = request.headers.get("user-agent")?.trim() ?? "";
+  if (!ua) {
+    return false;
+  }
+
   if (BOT_UA_REGEX.test(ua)) {
     return false;
   }
@@ -59,10 +74,7 @@ export async function recordClick(
     ).bind(linkId, day),
   ];
 
-  const enabledDims = (env.ANALYTICS_DIMENSIONS ?? "")
-    .split(",")
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean);
+  const enabledDims = parseEnabledDimensions(env.ANALYTICS_DIMENSIONS);
 
   for (const dim of enabledDims) {
     if (dim === "country") {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env, SELF } from "cloudflare:test";
-import { TOKEN_REGEX } from "../src/auth/tokens.js";
+import { TOKEN_FORMAT } from "../src/auth/tokens.js";
 
 describe("Authentication & Token Management", () => {
   beforeEach(async () => {
@@ -27,8 +27,8 @@ describe("Authentication & Token Management", () => {
     // After unauthenticated request, initial_token was bootstrapped in KV
     const initialToken = await env.AUTH_TOKENS.get("initial_token");
     expect(initialToken).not.toBeNull();
-    expect(initialToken).toMatch(/^rdir_[a-f0-9]{48}$/);
-    expect(TOKEN_REGEX.test(initialToken!)).toBe(true);
+    expect(initialToken).toMatch(/^rdir_initial_[A-Za-z0-9]{32}$/);
+    expect(TOKEN_FORMAT.test(initialToken!)).toBe(true);
   });
 
   it("authenticates via Authorization: Bearer <initial_token> and X-API-Key", async () => {
@@ -57,7 +57,27 @@ describe("Authentication & Token Management", () => {
     expect(bodyApiKey.principal.kind).toBe("initial");
   });
 
-  it("creates, lists (masked), and revokes regular custom tokens", async () => {
+  it("authenticates env.API_KEY regardless of format (B1/D14)", async () => {
+    // Set an API_KEY containing spaces, Base64 +, /, =
+    (env as any).API_KEY = "  secret+with/special=chars and spaces  ";
+
+    try {
+      const res = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
+        headers: { Authorization: "Bearer secret+with/special=chars and spaces" },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.principal).toEqual({
+        kind: "env",
+        id: "env",
+        name: "Environment API key",
+      });
+    } finally {
+      delete (env as any).API_KEY;
+    }
+  });
+
+  it("creates, lists (masked), and revokes regular custom tokens with single KV operations (D13)", async () => {
     // Setup initial token
     await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
     const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
@@ -73,9 +93,16 @@ describe("Authentication & Token Management", () => {
     });
     expect(createRes.status).toBe(201);
     const createdToken = (await createRes.json()) as any;
-    expect(createdToken.token).toMatch(/^rdir_[a-f0-9]{48}$/);
+    expect(createdToken.token).toMatch(/^rdir_[A-Za-z0-9]{10}_[A-Za-z0-9]{32}$/);
     expect(createdToken.name).toBe("CI Deployment Token");
-    expect(createdToken.preview).toContain("...");
+    expect(createdToken.preview).toMatch(/^rdir_[A-Za-z0-9]{10}_\.\.\./);
+
+    // Verify stored format in KV: key "token:<id>", value = full token plaintext
+    const { value: storedVal, metadata: storedMeta } =
+      await env.AUTH_TOKENS.getWithMetadata<any>(`token:${createdToken.id}`);
+    expect(storedVal).toBe(createdToken.token);
+    expect(storedMeta.name).toBe("CI Deployment Token");
+    expect(storedMeta.preview).toBe(createdToken.preview);
 
     // Authenticate with the new custom token
     const verifyRes = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
@@ -86,6 +113,13 @@ describe("Authentication & Token Management", () => {
     expect(verifyBody.principal.kind).toBe("token");
     expect(verifyBody.principal.id).toBe(createdToken.id);
     expect(verifyBody.principal.name).toBe("CI Deployment Token");
+
+    // Authenticate with right ID but wrong secret fails
+    const tamperedToken = `rdir_${createdToken.id}_00000000000000000000000000000000`;
+    const wrongSecretRes = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
+      headers: { Authorization: `Bearer ${tamperedToken}` },
+    });
+    expect(wrongSecretRes.status).toBe(401);
 
     // List tokens
     const listRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
@@ -100,7 +134,7 @@ describe("Authentication & Token Management", () => {
     expect(listBody.data[1].token).toBeUndefined();
     expect(listBody.data[1].preview).toBe(createdToken.preview);
 
-    // Delete custom token
+    // Delete custom token by ID
     const deleteRes = await SELF.fetch(
       `https://redirect.example.com/api/v1/tokens/${createdToken.id}`,
       {
@@ -110,11 +144,58 @@ describe("Authentication & Token Management", () => {
     );
     expect(deleteRes.status).toBe(200);
 
+    // Key in KV is gone
+    const afterDelete = await env.AUTH_TOKENS.get(`token:${createdToken.id}`);
+    expect(afterDelete).toBeNull();
+
     // After revocation, custom token returns 401
     const verifyRevoked = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
       headers: { Authorization: `Bearer ${createdToken.token}` },
     });
     expect(verifyRevoked.status).toBe(401);
+  });
+
+  it("validates token expiry on creation (B5)", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
+
+    // Expiry < 2 minutes in future is rejected
+    const tooSoon = new Date(Date.now() + 60_000).toISOString();
+    const soonRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${initialToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Too Soon", expiresAt: tooSoon }),
+    });
+    expect(soonRes.status).toBe(400);
+    const soonBody = (await soonRes.json()) as any;
+    expect(soonBody.error.code).toBe("invalid_expiry");
+
+    // Past expiry is rejected
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const pastRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${initialToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Past", expiresAt: past }),
+    });
+    expect(pastRes.status).toBe(400);
+
+    // Valid expiry (> 2 min) succeeds
+    const validExpiry = new Date(Date.now() + 600_000).toISOString();
+    const validRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${initialToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Valid Expiry", expiresAt: validExpiry }),
+    });
+    expect(validRes.status).toBe(201);
   });
 
   it("prevents deleting initial token via DELETE /tokens/initial and supports POST /tokens/initial/rotate", async () => {
@@ -138,6 +219,7 @@ describe("Authentication & Token Management", () => {
     expect(rotateRes.status).toBe(200);
     const rotateBody = (await rotateRes.json()) as any;
     expect(rotateBody.token).not.toBe(initialToken);
+    expect(rotateBody.token).toMatch(/^rdir_initial_[A-Za-z0-9]{32}$/);
 
     // Old initial token stops working
     const oldRes = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
@@ -167,12 +249,24 @@ describe("Authentication & Token Management", () => {
     const token2 = (await env.AUTH_TOKENS.get("initial_token"))!;
     expect(token2).not.toBeNull();
     expect(token2).not.toBe(token1);
+    expect(token2).toMatch(/^rdir_initial_[A-Za-z0-9]{32}$/);
 
     // Authenticate with new token
     const verifyRes = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
       headers: { Authorization: `Bearer ${token2}` },
     });
     expect(verifyRes.status).toBe(200);
+  });
+
+  it("regenerates a malformed initial_token in KV automatically on next unauthenticated request", async () => {
+    // Put legacy or corrupted initial_token into KV
+    await env.AUTH_TOKENS.put("initial_token", "legacy_hex_token_12345");
+
+    const res = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    expect(res.status).toBe(401);
+
+    const refreshed = await env.AUTH_TOKENS.get("initial_token");
+    expect(refreshed).toMatch(/^rdir_initial_[A-Za-z0-9]{32}$/);
   });
 
   it("rejects expired tokens and malformed token formats without touching KV", async () => {
@@ -182,16 +276,19 @@ describe("Authentication & Token Management", () => {
     });
     expect(malformedRes.status).toBe(401);
 
-    // Expired token
-    const expiredToken = "rdir_1111222233334444555566667777888899990000aaaabbbb";
+    // Expired token in KV
+    const expiredToken = "rdir_abcdef1234_11112222333344445555666677778888";
     await env.AUTH_TOKENS.put(
-      `token:${expiredToken}`,
-      JSON.stringify({
-        id: "exp1",
-        name: "Expired",
-        createdAt: "2020-01-01T00:00:00.000Z",
-        expiresAt: "2020-01-02T00:00:00.000Z",
-      })
+      "token:abcdef1234",
+      expiredToken,
+      {
+        metadata: {
+          name: "Expired",
+          createdAt: "2020-01-01T00:00:00.000Z",
+          expiresAt: "2020-01-02T00:00:00.000Z",
+          preview: "rdir_abcdef1234_...8888",
+        },
+      }
     );
 
     const expiredRes = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
@@ -200,24 +297,29 @@ describe("Authentication & Token Management", () => {
     expect(expiredRes.status).toBe(401);
   });
 
-  it("authenticates manually created token:<token> records in KV (e.g. from CF dashboard)", async () => {
-    const customSecret = "rdir_customsecret1234567890abcdef1234567890abcdef";
+  it("authenticates manually created token:<id> records in KV (e.g. from CF dashboard)", async () => {
+    const id = "manualid01";
+    const secret = "1234567890abcdef1234567890abcdef";
+    const customToken = `rdir_${id}_${secret}`;
     await env.AUTH_TOKENS.put(
-      `token:${customSecret}`,
-      JSON.stringify({
-        id: "manual-id",
-        name: "Dashboard Token",
-        createdAt: new Date().toISOString(),
-        expiresAt: null,
-      })
+      `token:${id}`,
+      customToken,
+      {
+        metadata: {
+          name: "Dashboard Token",
+          createdAt: new Date().toISOString(),
+          expiresAt: null,
+          preview: `rdir_${id}_...cdef`,
+        },
+      }
     );
 
     const res = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
-      headers: { Authorization: `Bearer ${customSecret}` },
+      headers: { Authorization: `Bearer ${customToken}` },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    expect(body.principal.id).toBe("manual-id");
+    expect(body.principal.id).toBe(id);
     expect(body.principal.name).toBe("Dashboard Token");
   });
 });

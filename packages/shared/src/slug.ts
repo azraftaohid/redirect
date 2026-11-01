@@ -3,7 +3,7 @@ import { validateSlug } from "./validation.js";
 
 export const BASE62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-export function generateRandomSlug(length = DEFAULT_SLUG_LENGTH): string {
+export function randomBase62(length: number): string {
   let result = "";
   while (result.length < length) {
     const randomBytes = new Uint8Array(length * 2);
@@ -18,6 +18,10 @@ export function generateRandomSlug(length = DEFAULT_SLUG_LENGTH): string {
     }
   }
   return result;
+}
+
+export function generateRandomSlug(length = DEFAULT_SLUG_LENGTH): string {
+  return randomBase62(length);
 }
 
 export function generateValidRandomSlug(length = DEFAULT_SLUG_LENGTH): string {

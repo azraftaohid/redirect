@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import worker from "../src/index.js";
 import { APP_SECURITY_HEADERS } from "../src/routes/app.js";
@@ -66,6 +66,7 @@ describe("Request Dispatcher & App Serving", () => {
     );
     expect(resRoot.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(resRoot.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(resRoot.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
 
     // 2. Deep client-side SPA route: /app/some/deep/route
     const resDeep = await fetchWorker("https://redirect.example.com/app/some/deep/route");
@@ -78,6 +79,31 @@ describe("Request Dispatcher & App Serving", () => {
     );
     expect(resDeep.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(resDeep.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(resDeep.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+
+    // 3. Conditional request on /app/ carries 304 if ETag matches (B2/R1.4)
+    const etag = resRoot.headers.get("ETag");
+    if (etag) {
+      const res304 = await fetchWorker("https://redirect.example.com/app/", {
+        headers: { "If-None-Match": etag },
+      });
+      expect(res304.status).toBe(304);
+      expect(res304.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+      expect(res304.headers.get("Content-Security-Policy")).toBe(
+        APP_SECURITY_HEADERS["Content-Security-Policy"]
+      );
+    }
+  });
+
+  it("short-circuits reserved slugs like /APP without hitting D1 (R3.6)", async () => {
+    const prepareSpy = vi.spyOn(env.DB, "prepare");
+    try {
+      const res = await fetchWorker("https://redirect.example.com/APP");
+      expect(res.status).toBe(404);
+      expect(prepareSpy).not.toHaveBeenCalled();
+    } finally {
+      prepareSpy.mockRestore();
+    }
   });
 
   it("returns 404 for missing static files under '/app/' with security headers", async () => {
@@ -90,11 +116,13 @@ describe("Request Dispatcher & App Serving", () => {
     expect(resMissing.headers.get("Referrer-Policy")).toBe("no-referrer");
   });
 
-  it("returns JSON 404 for unknown /api/* routes", async () => {
+  it("returns JSON 404 for unknown /api/* routes with security headers", async () => {
     const resApi = await fetchWorker("https://redirect.example.com/api/unknown");
     expect(resApi.status).toBe(404);
     expect(resApi.headers.get("Content-Type")).toContain("application/json");
     expect(resApi.headers.get("Cache-Control")).toBe("no-store");
+    expect(resApi.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    expect(resApi.headers.get("X-Content-Type-Options")).toBe("nosniff");
     const json = (await resApi.json()) as any;
     expect(json.error.code).toBe("not_found");
 

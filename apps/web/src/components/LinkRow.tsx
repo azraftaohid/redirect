@@ -42,6 +42,7 @@ interface LinkRowProps {
   onDelete: (id: string) => void;
   onOpenEdit: (link: LinkRecord) => void;
   onOpenQr: (link: LinkRecord) => void;
+  onTagClick?: (tag: string) => void;
 }
 
 export function LinkRow({
@@ -50,6 +51,7 @@ export function LinkRow({
   onDelete,
   onOpenEdit,
   onOpenQr,
+  onTagClick,
 }: LinkRowProps): React.ReactElement {
   const [copied, setCopied] = useState(false);
   const [isUpdatingActive, setIsUpdatingActive] = useState(false);
@@ -192,12 +194,17 @@ export function LinkRow({
             {link.tags && link.tags.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
                 {link.tags.map((t) => (
-                  <span
+                  <button
                     key={t}
-                    className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-xs font-medium"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTagClick?.(t);
+                    }}
+                    className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-xs font-medium transition-colors"
                   >
                     #{t}
-                  </span>
+                  </button>
                 ))}
               </div>
             )}

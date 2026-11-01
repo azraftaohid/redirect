@@ -1,12 +1,12 @@
 import type { MiddlewareHandler } from "hono";
 import type { AppContext } from "../types.js";
 import { formatErrorResponse } from "../errors.js";
-import { authenticate, ensureInitialToken, extractToken, TOKEN_REGEX } from "./tokens.js";
+import { authenticate, ensureInitialToken, extractToken } from "./tokens.js";
 
 export const authMiddleware: MiddlewareHandler<AppContext> = async (c, next) => {
   const token = extractToken(c.req.raw);
 
-  if (token && TOKEN_REGEX.test(token)) {
+  if (token && token.length <= 512) {
     const principal = await authenticate(c.env, token);
     if (principal) {
       c.set("principal", principal);

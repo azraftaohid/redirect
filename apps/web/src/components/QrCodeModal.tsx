@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   generateQrSvg,
-  generateQrPngDataUrl,
+  generateQrPngBlob,
   downloadBlob,
   copyImageBlobToClipboard,
 } from "@/utils/qr";
@@ -31,9 +31,10 @@ export function QrCodeModal({
   targetUrl,
 }: QrCodeModalProps): React.ReactElement {
   const [svgContent, setSvgContent] = useState<string | null>(null);
-  const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedImg, setCopiedImg] = useState(false);
+  const [downloadingPng, setDownloadingPng] = useState(false);
+  const [copyingImg, setCopyingImg] = useState(false);
 
   const shortUrl = typeof window !== "undefined" ? `${window.location.origin}/${slug}` : `/${slug}`;
 
@@ -43,14 +44,10 @@ export function QrCodeModal({
     let active = true;
     setLoading(true);
 
-    Promise.all([
-      generateQrSvg(shortUrl),
-      generateQrPngDataUrl(shortUrl, 1024),
-    ])
-      .then(([svg, png]) => {
+    generateQrSvg(shortUrl)
+      .then((svg) => {
         if (!active) return;
         setSvgContent(svg);
-        setPngDataUrl(png);
         setLoading(false);
       })
       .catch((err) => {
@@ -64,14 +61,17 @@ export function QrCodeModal({
     };
   }, [isOpen, slug, shortUrl]);
 
-  function handleDownloadPng() {
-    if (!pngDataUrl) return;
-    fetch(pngDataUrl)
-      .then((res) => res.blob())
-      .then((blob) => {
-        downloadBlob(blob, `${slug}-qr.png`);
-        toast.success("Downloaded PNG QR code");
-      });
+  async function handleDownloadPng() {
+    setDownloadingPng(true);
+    try {
+      const blob = await generateQrPngBlob(shortUrl, 1024);
+      downloadBlob(blob, `${slug}-qr.png`);
+      toast.success("Downloaded PNG QR code");
+    } catch (err) {
+      toast.error("Failed to generate PNG: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setDownloadingPng(false);
+    }
   }
 
   function handleDownloadSvg() {
@@ -82,10 +82,9 @@ export function QrCodeModal({
   }
 
   async function handleCopyImage() {
-    if (!pngDataUrl) return;
+    setCopyingImg(true);
     try {
-      const res = await fetch(pngDataUrl);
-      const blob = await res.blob();
+      const blob = await generateQrPngBlob(shortUrl, 1024);
       const success = await copyImageBlobToClipboard(blob);
       if (success) {
         setCopiedImg(true);
@@ -94,8 +93,10 @@ export function QrCodeModal({
       } else {
         toast.error("Clipboard image copy not supported by your browser");
       }
-    } catch {
-      toast.error("Failed to copy image to clipboard");
+    } catch (err) {
+      toast.error("Failed to copy image to clipboard: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setCopyingImg(false);
     }
   }
 
@@ -135,11 +136,11 @@ export function QrCodeModal({
             variant="outline"
             size="sm"
             onClick={handleCopyImage}
-            disabled={loading || !pngDataUrl}
+            disabled={loading || copyingImg}
             className="w-full sm:w-auto gap-1.5"
           >
             {copiedImg ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-            <span>Copy Image</span>
+            <span>{copyingImg ? "Copying..." : "Copy Image"}</span>
           </Button>
 
           <Button
@@ -156,11 +157,11 @@ export function QrCodeModal({
           <Button
             size="sm"
             onClick={handleDownloadPng}
-            disabled={loading || !pngDataUrl}
+            disabled={loading || downloadingPng}
             className="w-full sm:w-auto gap-1.5"
           >
             <Download className="w-4 h-4" />
-            <span>Download PNG (1024px)</span>
+            <span>{downloadingPng ? "Generating..." : "Download PNG (1024px)"}</span>
           </Button>
         </DialogFooter>
       </DialogContent>

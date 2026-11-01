@@ -8,11 +8,13 @@ export interface DailyClickPoint {
 }
 
 /**
- * Ensures a continuous daily time-series by zero-filling missing UTC days for the given range.
+ * Ensures a continuous daily time-series by zero-filling missing UTC days
+ * from `from` to `to` inclusive.
  */
 export function zeroFillDailySeries(
-  days: number,
-  records: Array<{ day: string; clicks: number }>
+  records: Array<{ day: string; clicks: number }>,
+  from: string,
+  to: string
 ): DailyClickPoint[] {
   const recordMap = new Map<string, number>();
   for (const r of records) {
@@ -20,18 +22,23 @@ export function zeroFillDailySeries(
   }
 
   const result: DailyClickPoint[] = [];
-  const now = new Date();
+  const fromParts = from.split("-").map(Number);
+  const toParts = to.split("-").map(Number);
+  if (fromParts.length !== 3 || toParts.length !== 3) {
+    return records.map((r) => ({ day: r.day, clicks: r.clicks }));
+  }
 
-  // Create UTC day buckets ending today
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const dayKey = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const current = new Date(Date.UTC(fromParts[0]!, fromParts[1]! - 1, fromParts[2]!));
+  const end = new Date(Date.UTC(toParts[0]!, toParts[1]! - 1, toParts[2]!));
+  const pad = (n: number) => String(n).padStart(2, "0");
 
+  while (current.getTime() <= end.getTime()) {
+    const dayKey = `${current.getUTCFullYear()}-${pad(current.getUTCMonth() + 1)}-${pad(current.getUTCDate())}`;
     result.push({
       day: dayKey,
       clicks: recordMap.get(dayKey) ?? 0,
     });
+    current.setUTCDate(current.getUTCDate() + 1);
   }
 
   return result;
@@ -61,6 +68,7 @@ export function formatUtcDay(dayString: string): string {
 /**
  * Converts a 2-letter ISO country code into a flag emoji and localized country name.
  * e.g. "US" -> "🇺🇸 United States"
+ * "XX" returns "Unknown" without flag.
  */
 export function formatCountryName(isoCode: string): string {
   if (!isoCode || isoCode.length !== 2) {
@@ -68,6 +76,10 @@ export function formatCountryName(isoCode: string): string {
   }
 
   const upper = isoCode.toUpperCase();
+  if (upper === "XX") {
+    return "Unknown";
+  }
+
   let flag = "";
   try {
     flag = String.fromCodePoint(

@@ -1,16 +1,22 @@
 import { Hono } from "hono";
-import { SLUG_REGEX } from "@redirect/shared";
+import { RESERVED_SLUGS, SLUG_REGEX } from "@redirect/shared";
 import type { AppContext, Env } from "./types.js";
 import { handleApiError, ApiError } from "./errors.js";
 import { authMiddleware } from "./auth/middleware.js";
 import { tokensRouter } from "./routes/tokens.js";
 import { linksRouter } from "./routes/links.js";
 import { statsRouter } from "./routes/stats.js";
-import { handleRedirect, handleRoot } from "./routes/redirect.js";
+import { handleRedirect, handleRoot, respondUnknownLink } from "./routes/redirect.js";
 import { serveApp, renderNotFound } from "./routes/app.js";
 
 // API Hono app
 const apiApp = new Hono<AppContext>();
+
+apiApp.use("*", async (c, next) => {
+  await next();
+  c.header("X-Robots-Tag", "noindex, nofollow");
+  c.header("X-Content-Type-Options", "nosniff");
+});
 
 apiApp.onError((err, c) => {
   return handleApiError(err, c);
@@ -70,7 +76,20 @@ export default {
     // 5. Single segment (one optional trailing /) that matches SLUG_REGEX against raw path -> redirect handler.
     const match = pathname.match(SINGLE_SEGMENT_REGEX);
     if (match && match[1] && SLUG_REGEX.test(match[1])) {
-      return handleRedirect(match[1], request, env, ctx);
+      const segment = match[1];
+      if ((RESERVED_SLUGS as readonly string[]).includes(segment.toLowerCase())) {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          return new Response("Method Not Allowed", {
+            status: 405,
+            headers: {
+              Allow: "GET, HEAD",
+              "Content-Type": "text/plain; charset=utf-8",
+            },
+          });
+        }
+        return respondUnknownLink(request, env);
+      }
+      return handleRedirect(segment, request, env, ctx);
     }
 
     // 6. Anything else -> try env.ASSETS.fetch(request) for an exact static file (e.g. /favicon.ico); if it returns 404, return the 404 page.

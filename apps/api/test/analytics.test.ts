@@ -105,7 +105,7 @@ describe("Analytics & Click Recording", () => {
     expect(daily?.clicks).toBe(1);
   });
 
-  it("redirects without counting for HEAD, bots, and prefetch requests", async () => {
+  it("redirects without counting for HEAD, bots, empty UA, and prefetch requests", async () => {
     // 1. HEAD request
     const headRes = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
       method: "HEAD",
@@ -113,20 +113,34 @@ describe("Analytics & Click Recording", () => {
     });
     expect(headRes.status).toBe(307);
 
-    // 2. Bot User-Agents
-    const botRes1 = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
-      headers: { "User-Agent": "Googlebot/2.1 (+http://www.google.com/bot.html)" },
+    // 2. Empty User-Agent (R6)
+    const emptyUaRes = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
+      headers: { "User-Agent": "" },
       redirect: "manual",
     });
-    expect(botRes1.status).toBe(307);
+    expect(emptyUaRes.status).toBe(307);
 
-    const botRes2 = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
-      headers: { "User-Agent": "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)" },
-      redirect: "manual",
-    });
-    expect(botRes2.status).toBe(307);
+    // 3. Extended Bot User-Agents (R6)
+    const botUas = [
+      "Googlebot/2.1 (+http://www.google.com/bot.html)",
+      "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+      "curl/7.88.1",
+      "python-requests/2.31.0",
+      "Mastodon/4.2.0",
+      "UptimeRobot/2.0",
+      "undici",
+      "axios/1.6.0",
+    ];
 
-    // 3. Prefetch / Prerender headers
+    for (const ua of botUas) {
+      const botRes = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
+        headers: { "User-Agent": ua },
+        redirect: "manual",
+      });
+      expect(botRes.status).toBe(307);
+    }
+
+    // 4. Prefetch / Prerender headers
     const prefetchRes = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
       headers: {
         "User-Agent": "Mozilla/5.0 Chrome",
@@ -150,6 +164,27 @@ describe("Analytics & Click Recording", () => {
       .bind(testLinkId)
       .first<{ click_count: number }>();
     expect(link?.click_count).toBe(0);
+  });
+
+  it("counts in-app browsers used by real people (R6)", async () => {
+    const inAppUas = [
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 289.0.0.25.49",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 15_4 like Mac OS X) AppleWebKit/605.1.15 [FBAN/FBIOS;FBAV/365.0.0.30.112]",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) Twitter for iPhone",
+    ];
+
+    for (const ua of inAppUas) {
+      const res = await fetchWorker(`https://redirect.example.com/${testLinkSlug}`, {
+        headers: { "User-Agent": ua },
+        redirect: "manual",
+      });
+      expect(res.status).toBe(307);
+    }
+
+    const link = await env.DB.prepare("SELECT click_count FROM links WHERE id = ?")
+      .bind(testLinkId)
+      .first<{ click_count: number }>();
+    expect(link?.click_count).toBe(inAppUas.length);
   });
 
   it("writes nothing when ANALYTICS_ENABLED is 'false'", async () => {
@@ -214,7 +249,7 @@ describe("Analytics & Click Recording", () => {
     ]);
   });
 
-  it("returns daily series and only enabled dimensions on /stats endpoint", async () => {
+  it("returns daily series and only enabled dimensions on /stats endpoint (R3.5)", async () => {
     const countryEnv = { ANALYTICS_DIMENSIONS: "country" };
     const req = new Request("https://redirect.example.com/test");
     await recordClick({ ...env, ...countryEnv }, testLinkId, req);
@@ -229,8 +264,9 @@ describe("Analytics & Click Recording", () => {
     expect(res.status).toBe(200);
 
     const stats = (await res.json()) as any;
-    expect(stats.linkId).toBe(testLinkId);
-    expect(stats.totalClicks).toBe(1);
+    expect(stats.link).toBeDefined();
+    expect(stats.link.id).toBe(testLinkId);
+    expect(stats.link.clickCount).toBe(1);
     expect(stats.daily.length).toBeGreaterThan(0);
     // Only "country" is in ANALYTICS_DIMENSIONS ("referrer" was disabled, so it must not be present in dimensions)
     expect(stats.dimensions).toBeDefined();

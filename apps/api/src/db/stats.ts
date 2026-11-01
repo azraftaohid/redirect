@@ -1,40 +1,35 @@
-import type { LinkStats } from "@redirect/shared";
+import type { DimRow, LinkStats } from "@redirect/shared";
+import type { AnalyticsDimension } from "../utils/analytics.js";
+import { mapRowToLinkRecord } from "./links.js";
 
 export async function getLinkStats(
   db: D1Database,
-  linkId: string,
-  totalClicks: number,
-  lastClickedAt: string | null,
+  id: string,
   days: number,
-  enabledDimensions: string[] = []
-): Promise<LinkStats> {
+  enabledDimensions: AnalyticsDimension[] = []
+): Promise<LinkStats | null> {
   const toDate = new Date();
   const fromDate = new Date(toDate.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
 
   const toStr = toDate.toISOString().slice(0, 10);
   const fromStr = fromDate.toISOString().slice(0, 10);
 
-  // Daily clicks query
+  const linkStmt = db.prepare("SELECT * FROM links WHERE id = ? LIMIT 1").bind(id);
+
   const dailySql = `
     SELECT day, clicks
     FROM link_daily_clicks
     WHERE link_id = ? AND day >= ? AND day <= ?
     ORDER BY day ASC
   `;
-  const { results: dailyResults } = await db
-    .prepare(dailySql)
-    .bind(linkId, fromStr, toStr)
-    .all<{ day: string; clicks: number }>();
+  const dailyStmt = db.prepare(dailySql).bind(id, fromStr, toStr);
 
-  const daily = dailyResults.map((r) => ({
-    day: r.day,
-    clicks: Number(r.clicks),
-  }));
-
-  const dimensions: Record<string, Array<{ value: string; clicks: number }>> = {};
+  const statements: D1PreparedStatement[] = [linkStmt, dailyStmt];
+  const dimNames: AnalyticsDimension[] = [];
 
   for (const dim of enabledDimensions) {
     if (dim === "country" || dim === "referrer") {
+      dimNames.push(dim);
       const dimSql = `
         SELECT value, SUM(clicks) as clicks
         FROM link_daily_dims
@@ -43,22 +38,35 @@ export async function getLinkStats(
         ORDER BY clicks DESC
         LIMIT 10
       `;
-      const { results: dimResults } = await db
-        .prepare(dimSql)
-        .bind(linkId, dim, fromStr, toStr)
-        .all<{ value: string; clicks: number }>();
-
-      dimensions[dim] = dimResults.map((r) => ({
-        value: r.value,
-        clicks: Number(r.clicks),
-      }));
+      statements.push(db.prepare(dimSql).bind(id, dim, fromStr, toStr));
     }
   }
 
+  const results = await db.batch(statements);
+  const linkRow = results[0]?.results?.[0] as Record<string, unknown> | undefined;
+  if (!linkRow) {
+    return null;
+  }
+  const link = mapRowToLinkRecord(linkRow);
+
+  const dailyRows = (results[1]?.results ?? []) as Array<{ day: string; clicks: number }>;
+  const daily = dailyRows.map((r) => ({
+    day: r.day,
+    clicks: Number(r.clicks),
+  }));
+
+  const dimensions: { country?: DimRow[]; referrer?: DimRow[] } = {};
+  for (let i = 0; i < dimNames.length; i++) {
+    const dim = dimNames[i]!;
+    const dimRows = (results[2 + i]?.results ?? []) as Array<{ value: string; clicks: number }>;
+    dimensions[dim] = dimRows.map((r) => ({
+      value: r.value,
+      clicks: Number(r.clicks),
+    }));
+  }
+
   return {
-    linkId,
-    totalClicks,
-    lastClickedAt,
+    link,
     range: {
       days,
       from: fromStr,

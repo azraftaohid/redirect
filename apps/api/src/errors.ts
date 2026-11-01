@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiErrorBody } from "@redirect/shared";
 
@@ -42,6 +43,13 @@ export function handleApiError(err: unknown, c: Context): Response {
       err.message,
       err.details
     );
+    return c.json(body, status, { "Cache-Control": "no-store" });
+  }
+
+  if (err instanceof HTTPException) {
+    const status = err.status as ContentfulStatusCode;
+    const code = status === 400 ? "bad_request" : "http_error";
+    const { body } = formatErrorResponse(status, code, err.message);
     return c.json(body, status, { "Cache-Control": "no-store" });
   }
 

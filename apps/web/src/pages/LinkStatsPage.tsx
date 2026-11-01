@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "wouter";
 import type { LinkRecord, LinkStats } from "@redirect/shared";
-import { getLink, getLinkStats } from "@/api/client";
+import { getLinkStats } from "@/api/client";
 import { zeroFillDailySeries, formatCountryName } from "@/utils/stats";
 import { formatDisplayDate, isLinkExpired } from "@/utils/dates";
 import { DailyChart } from "@/components/DailyChart";
@@ -25,6 +25,7 @@ import {
   MousePointerClick,
   Activity,
   AlertCircle,
+  Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,10 +43,6 @@ export function LinkStatsPage(): React.ReactElement {
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
 
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  }, [id]);
-
   const fetchData = useCallback(
     async (showRefreshing = false) => {
       if (!id) return;
@@ -53,11 +50,8 @@ export function LinkStatsPage(): React.ReactElement {
       else setLoading(true);
 
       try {
-        const [linkRes, statsRes] = await Promise.all([
-          getLink(id),
-          getLinkStats(id, days),
-        ]);
-        setLink(linkRes);
+        const statsRes = await getLinkStats(id, days);
+        setLink(statsRes.link);
         setStats(statsRes);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to load link statistics");
@@ -117,9 +111,20 @@ export function LinkStatsPage(): React.ReactElement {
     );
   }
 
-  const chartSeries = stats ? zeroFillDailySeries(days, stats.daily) : [];
+  const chartSeries = stats ? zeroFillDailySeries(stats.daily, stats.range.from, stats.range.to) : [];
   const expired = isLinkExpired(link.expiresAt);
+  const periodClicks = stats?.daily ? stats.daily.reduce((sum, d) => sum + d.clicks, 0) : 0;
+  let peakDay: { day: string; clicks: number } | null = null;
+  if (stats?.daily && stats.daily.length > 0) {
+    for (const d of stats.daily) {
+      if (!peakDay || d.clicks > peakDay.clicks) {
+        peakDay = d;
+      }
+    }
+  }
 
+  const hasCountry = stats?.dimensions?.country !== undefined;
+  const hasReferrer = stats?.dimensions?.referrer !== undefined;
   const countries = stats?.dimensions?.country ?? [];
   const referrers = stats?.dimensions?.referrer ?? [];
 
@@ -137,7 +142,7 @@ export function LinkStatsPage(): React.ReactElement {
             </Button>
           </Link>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold tracking-tight font-mono">
                 /{link.slug}
               </h1>
@@ -155,6 +160,14 @@ export function LinkStatsPage(): React.ReactElement {
                 <Badge variant="success" className="text-xs">Active</Badge>
               ) : (
                 <Badge variant="secondary" className="text-xs">Inactive</Badge>
+              )}
+              <Badge variant="outline" className="font-mono text-xs">
+                {link.statusCode}
+              </Badge>
+              {link.forwardQuery && (
+                <Badge variant="outline" className="text-xs">
+                  Forward Query
+                </Badge>
               )}
             </div>
             <div className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
@@ -226,15 +239,34 @@ export function LinkStatsPage(): React.ReactElement {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 p-4">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-              Period Clicks
+              Clicks in Period
             </CardTitle>
             <Activity className="w-4 h-4 text-zinc-400" />
           </CardHeader>
           <CardContent className="p-4 pt-0">
             <div className="text-2xl font-bold font-mono">
-              {stats?.totalClicks.toLocaleString() ?? "—"}
+              {stats ? periodClicks.toLocaleString() : "—"}
             </div>
             <p className="text-xs text-zinc-400 mt-1">Last {days} days</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 p-4">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Peak Day
+            </CardTitle>
+            <Calendar className="w-4 h-4 text-zinc-400" />
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="text-sm font-semibold truncate font-mono">
+              {peakDay && peakDay.clicks > 0
+                ? `${peakDay.day} (${peakDay.clicks.toLocaleString()})`
+                : "—"}
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              {peakDay && peakDay.clicks > 0 ? "Highest single day" : "No clicks in period"}
+            </p>
           </CardContent>
         </Card>
 
@@ -251,25 +283,6 @@ export function LinkStatsPage(): React.ReactElement {
             </div>
             <p className="text-xs text-zinc-400 mt-1">
               {link.lastClickedAt ? "Latest visitor" : "No visits yet"}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 p-4">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-              Configuration
-            </CardTitle>
-            <Badge variant="outline" className="font-mono text-xs py-0.5 px-2">
-              {link.statusCode}
-            </Badge>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-sm font-semibold">
-              {link.forwardQuery ? "Forwarding Query" : "Preserve Query: Off"}
-            </div>
-            <p className="text-xs text-zinc-400 mt-1 truncate">
-              Created {formatDisplayDate(link.createdAt)}
             </p>
           </CardContent>
         </Card>
@@ -309,10 +322,10 @@ export function LinkStatsPage(): React.ReactElement {
       </Card>
 
       {/* Dimension Breakdown Cards */}
-      {(countries.length > 0 || referrers.length > 0) && (
+      {(hasCountry || hasReferrer) ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Countries Breakdown */}
-          {countries.length > 0 && (
+          {hasCountry && (
             <Card>
               <CardHeader className="p-5 pb-3">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -321,31 +334,35 @@ export function LinkStatsPage(): React.ReactElement {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-5 pt-0 space-y-2.5">
-                {countries.map((c) => {
-                  const pct = Math.round((c.clicks / maxCountryClicks) * 100);
-                  return (
-                    <div key={c.value} className="space-y-1">
-                      <div className="flex items-center justify-between text-sm font-medium">
-                        <span className="truncate">{formatCountryName(c.value)}</span>
-                        <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">
-                          {c.clicks.toLocaleString()}
-                        </span>
+                {countries.length === 0 ? (
+                  <p className="text-xs text-zinc-400 py-4 text-center">No data in this period</p>
+                ) : (
+                  countries.map((c) => {
+                    const pct = Math.round((c.clicks / maxCountryClicks) * 100);
+                    return (
+                      <div key={c.value} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm font-medium">
+                          <span className="truncate">{formatCountryName(c.value)}</span>
+                          <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">
+                            {c.clicks.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-zinc-900 dark:bg-zinc-100 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="bg-zinc-900 dark:bg-zinc-100 h-full rounded-full transition-all duration-300"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </CardContent>
             </Card>
           )}
 
           {/* Referrers Breakdown */}
-          {referrers.length > 0 && (
+          {hasReferrer && (
             <Card>
               <CardHeader className="p-5 pb-3">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -354,30 +371,41 @@ export function LinkStatsPage(): React.ReactElement {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-5 pt-0 space-y-2.5">
-                {referrers.map((r) => {
-                  const pct = Math.round((r.clicks / maxReferrerClicks) * 100);
-                  const label = r.value === "" || r.value === "direct" ? "Direct / None" : r.value;
-                  return (
-                    <div key={r.value} className="space-y-1">
-                      <div className="flex items-center justify-between text-sm font-medium">
-                        <span className="truncate">{label}</span>
-                        <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">
-                          {r.clicks.toLocaleString()}
-                        </span>
+                {referrers.length === 0 ? (
+                  <p className="text-xs text-zinc-400 py-4 text-center">No data in this period</p>
+                ) : (
+                  referrers.map((r) => {
+                    const pct = Math.round((r.clicks / maxReferrerClicks) * 100);
+                    const label =
+                      r.value === "(direct)" || r.value === "" || r.value === "direct"
+                        ? "Direct / none"
+                        : r.value;
+                    return (
+                      <div key={r.value} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm font-medium">
+                          <span className="truncate">{label}</span>
+                          <span className="font-mono text-zinc-500 dark:text-zinc-400 text-xs">
+                            {r.clicks.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-zinc-900 dark:bg-zinc-100 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="bg-zinc-900 dark:bg-zinc-100 h-full rounded-full transition-all duration-300"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </CardContent>
             </Card>
           )}
         </div>
+      ) : (
+        <p className="text-xs text-zinc-400 text-center py-2">
+          Country and referrer breakdowns are disabled. Enable them by setting <code className="font-mono bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded">ANALYTICS_DIMENSIONS="country,referrer"</code> in your Worker environment variables.
+        </p>
       )}
 
       {/* Edit Modal */}
@@ -386,7 +414,7 @@ export function LinkStatsPage(): React.ReactElement {
         onClose={() => setFormModalOpen(false)}
         onSuccess={(updated) => {
           setLink(updated);
-          fetchData(true);
+          setStats((prev) => (prev ? { ...prev, link: updated } : null));
         }}
         initialLink={link}
       />

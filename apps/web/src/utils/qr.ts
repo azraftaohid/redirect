@@ -16,10 +16,11 @@ export async function generateQrSvg(text: string): Promise<string> {
 }
 
 /**
- * Generates a high-resolution PNG data URL for a QR code.
+ * Generates a high-resolution PNG Blob for a QR code using an HTML5 Canvas.
  */
-export async function generateQrPngDataUrl(text: string, width = 1024): Promise<string> {
-  return QRCode.toDataURL(text, {
+export async function generateQrPngBlob(text: string, width = 1024): Promise<Blob> {
+  const canvas = document.createElement("canvas");
+  await QRCode.toCanvas(canvas, text, {
     width,
     margin: 2,
     errorCorrectionLevel: "M",
@@ -27,6 +28,15 @@ export async function generateQrPngDataUrl(text: string, width = 1024): Promise<
       dark: "#000000",
       light: "#ffffff",
     },
+  });
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("Failed to convert QR canvas to Blob"));
+      }
+    }, "image/png");
   });
 }
 

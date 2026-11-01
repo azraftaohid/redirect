@@ -14,6 +14,28 @@ interface LinkRedirectRow {
 }
 
 /**
+ * Responds to unknown, inactive, expired, or reserved links:
+ * If a valid and loop-free FALLBACK_URL is configured, redirect to it (307).
+ * Otherwise, render the 404 page.
+ */
+export async function respondUnknownLink(request: Request, env: Env): Promise<Response> {
+  if (env.FALLBACK_URL) {
+    const ownHostnames = parseOwnHostnames(new URL(request.url).hostname, env.OWN_HOSTNAMES);
+    const validation = validateTargetUrl(env.FALLBACK_URL, ownHostnames);
+    if (validation.ok) {
+      return new Response(null, {
+        status: 307,
+        headers: {
+          Location: env.FALLBACK_URL,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+  }
+  return renderNotFound(request, env);
+}
+
+/**
  * Handles incoming single-slug redirection:
  * 1. Queries D1 for exact matching slug.
  * 2. On DB failure, returns 503 (never 404).
@@ -61,20 +83,7 @@ export async function handleRedirect(
     link.is_active !== 1 ||
     (link.expires_at !== null && link.expires_at <= now)
   ) {
-    if (env.FALLBACK_URL) {
-      const ownHostnames = parseOwnHostnames(new URL(request.url).hostname, env.OWN_HOSTNAMES);
-      const validation = validateTargetUrl(env.FALLBACK_URL, ownHostnames);
-      if (validation.ok) {
-        return new Response(null, {
-          status: 307,
-          headers: {
-            Location: env.FALLBACK_URL,
-            "Cache-Control": "no-store",
-          },
-        });
-      }
-    }
-    return renderNotFound(request, env);
+    return respondUnknownLink(request, env);
   }
 
   const url = new URL(request.url);
@@ -100,22 +109,8 @@ export async function handleRedirect(
 
 /**
  * Handles requests to root '/':
- * If a valid and loop-free FALLBACK_URL is configured, redirect to it (307).
- * Otherwise, render the 404 page.
+ * Uses shared respondUnknownLink helper.
  */
 export async function handleRoot(request: Request, env: Env): Promise<Response> {
-  if (env.FALLBACK_URL) {
-    const ownHostnames = parseOwnHostnames(new URL(request.url).hostname, env.OWN_HOSTNAMES);
-    const validation = validateTargetUrl(env.FALLBACK_URL, ownHostnames);
-    if (validation.ok) {
-      return new Response(null, {
-        status: 307,
-        headers: {
-          Location: env.FALLBACK_URL,
-          "Cache-Control": "no-store",
-        },
-      });
-    }
-  }
-  return renderNotFound(request, env);
+  return respondUnknownLink(request, env);
 }

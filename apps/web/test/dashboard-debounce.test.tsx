@@ -100,7 +100,7 @@ describe("DashboardPage Search Debounce", () => {
     expect(mockListLinks).toHaveBeenCalledTimes(2);
 
     // Click clear X button
-    const clearBtn = screen.getByRole("button", { name: "" });
+    const clearBtn = screen.getByRole("button", { name: /clear search/i });
     await act(async () => {
       fireEvent.click(clearBtn);
     });

@@ -3,8 +3,8 @@ import { zValidator } from "@hono/zod-validator";
 import { statsQuerySchema } from "@redirect/shared";
 import type { AppContext } from "../types.js";
 import { ApiError } from "../errors.js";
-import { getLinkById } from "../db/links.js";
 import { getLinkStats } from "../db/stats.js";
+import { parseEnabledDimensions } from "../utils/analytics.js";
 
 export const statsRouter = new Hono<AppContext>();
 
@@ -20,24 +20,12 @@ statsRouter.get(
     const id = c.req.param("id");
     const query = c.req.valid("query");
 
-    const link = await getLinkById(c.env.DB, id);
-    if (!link) {
+    const enabledDims = parseEnabledDimensions(c.env.ANALYTICS_DIMENSIONS);
+    const stats = await getLinkStats(c.env.DB, id, query.days, enabledDims);
+
+    if (!stats) {
       throw new ApiError(404, "not_found", `Link with id '${id}' not found.`);
     }
-
-    const enabledDims = (c.env.ANALYTICS_DIMENSIONS || "")
-      .split(",")
-      .map((d) => d.trim().toLowerCase())
-      .filter((d) => d === "country" || d === "referrer");
-
-    const stats = await getLinkStats(
-      c.env.DB,
-      link.id,
-      link.clickCount,
-      link.lastClickedAt,
-      query.days,
-      enabledDims
-    );
 
     return c.json(stats, 200, { "Cache-Control": "no-store" });
   }

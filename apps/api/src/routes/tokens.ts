@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { createTokenSchema, type TokenInfo } from "@redirect/shared";
+import { createTokenSchema, randomBase62, type TokenInfo } from "@redirect/shared";
 import type { AppContext } from "../types.js";
 import { ApiError } from "../errors.js";
 import {
   generateToken,
-  generateTokenId,
   maskToken,
   rotateInitialToken,
-  type StoredTokenRecord,
+  TOKEN_ID_LENGTH,
+  type StoredTokenMetadata,
 } from "../auth/tokens.js";
 
 export const tokensRouter = new Hono<AppContext>();
@@ -24,7 +24,7 @@ tokensRouter.get("/tokens", async (c) => {
   const tokens: TokenInfo[] = [];
 
   // Prepend initial token if API_KEY is unset and initial_token exists
-  if (!c.env.API_KEY) {
+  if (!c.env.API_KEY?.trim()) {
     const { value: initialToken, metadata } =
       await c.env.AUTH_TOKENS.getWithMetadata<{ createdAt?: string }>("initial_token");
     if (initialToken) {
@@ -39,36 +39,38 @@ tokensRouter.get("/tokens", async (c) => {
     }
   }
 
-  // List all "token:*" keys with metadata
+  // List all "token:*" keys with metadata (no value reads)
   let cursor: string | undefined = undefined;
-  let pages = 0;
-  const maxPages = 10;
+  const customTokens: TokenInfo[] = [];
 
   do {
-    const listRes: KVNamespaceListResult<StoredTokenRecord> =
-      await c.env.AUTH_TOKENS.list<StoredTokenRecord>({
+    const listRes: KVNamespaceListResult<StoredTokenMetadata> =
+      await c.env.AUTH_TOKENS.list<StoredTokenMetadata>({
         prefix: "token:",
         cursor,
       });
-    pages++;
 
     for (const key of listRes.keys) {
-      const actualToken = key.name.replace(/^token:/, "");
+      const id = key.name.slice("token:".length);
       const meta = key.metadata;
-      tokens.push({
-        id: meta?.id ?? "unknown",
+      customTokens.push({
+        id,
         name: meta?.name ?? "Custom token",
         createdAt: meta?.createdAt ?? new Date().toISOString(),
         expiresAt: meta?.expiresAt ?? null,
-        preview: maskToken(actualToken),
+        preview: meta?.preview ?? `rdir_${id}_...`,
       });
     }
 
-    if (listRes.list_complete || pages >= maxPages) {
+    if (listRes.list_complete) {
       break;
     }
     cursor = listRes.cursor;
   } while (cursor);
+
+  // Sort custom tokens by createdAt desc
+  customTokens.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  tokens.push(...customTokens);
 
   return c.json({ data: tokens }, 200, { "Cache-Control": "no-store" });
 });
@@ -83,38 +85,48 @@ tokensRouter.post(
   }),
   async (c) => {
     const { name, expiresAt } = c.req.valid("json");
-    const rawToken = generateToken();
-    const id = generateTokenId();
-    const createdAt = new Date().toISOString();
-
-    const record: StoredTokenRecord = {
-      id,
-      name,
-      createdAt,
-      expiresAt: expiresAt ?? null,
-    };
-
-    const options: KVNamespacePutOptions = {
-      metadata: record,
-    };
 
     if (expiresAt) {
-      const expSeconds = Math.floor(new Date(expiresAt).getTime() / 1000);
-      if (Number.isFinite(expSeconds) && expSeconds > Math.floor(Date.now() / 1000)) {
-        options.expiration = expSeconds;
+      const expMs = Date.parse(expiresAt);
+      if (!Number.isFinite(expMs) || expMs < Date.now() + 120_000) {
+        throw new ApiError(
+          400,
+          "invalid_expiry",
+          "Token expiry must be at least 2 minutes in the future."
+        );
       }
     }
 
-    await c.env.AUTH_TOKENS.put(`token:${rawToken}`, JSON.stringify(record), options);
+    const id = randomBase62(TOKEN_ID_LENGTH);
+    const token = generateToken(id);
+    const createdAt = new Date().toISOString();
+    const preview = maskToken(token);
+
+    const metadata: StoredTokenMetadata = {
+      name,
+      createdAt,
+      expiresAt: expiresAt ?? null,
+      preview,
+    };
+
+    const options: KVNamespacePutOptions = {
+      metadata,
+    };
+
+    if (expiresAt) {
+      options.expiration = Math.floor(Date.parse(expiresAt) / 1000);
+    }
+
+    await c.env.AUTH_TOKENS.put(`token:${id}`, token, options);
 
     return c.json(
       {
-        token: rawToken,
+        token,
         id,
         name,
         createdAt,
-        expiresAt: record.expiresAt,
-        preview: maskToken(rawToken),
+        expiresAt: metadata.expiresAt,
+        preview,
       },
       201,
       { "Cache-Control": "no-store" }
@@ -134,43 +146,17 @@ tokensRouter.delete("/tokens/:id", async (c) => {
     );
   }
 
-  // Find the token by id via list
-  let cursor: string | undefined = undefined;
-  let targetKey: string | null = null;
-  let pages = 0;
-
-  do {
-    const listRes: KVNamespaceListResult<StoredTokenRecord> =
-      await c.env.AUTH_TOKENS.list<StoredTokenRecord>({
-        prefix: "token:",
-        cursor,
-      });
-    pages++;
-
-    for (const key of listRes.keys) {
-      if (key.metadata?.id === id) {
-        targetKey = key.name;
-        break;
-      }
-    }
-
-    if (targetKey || listRes.list_complete || pages >= 10) {
-      break;
-    }
-    cursor = listRes.cursor;
-  } while (cursor);
-
-  if (!targetKey) {
+  if (!/^[A-Za-z0-9]{10}$/.test(id)) {
     throw new ApiError(404, "not_found", `Token with id '${id}' not found.`);
   }
 
-  await c.env.AUTH_TOKENS.delete(targetKey);
+  await c.env.AUTH_TOKENS.delete(`token:${id}`);
   return c.json({ deleted: true, id }, 200, { "Cache-Control": "no-store" });
 });
 
 // POST /api/v1/tokens/initial/rotate
 tokensRouter.post("/tokens/initial/rotate", async (c) => {
-  if (c.env.API_KEY && c.env.API_KEY.length > 0) {
+  if (c.env.API_KEY && c.env.API_KEY.trim().length > 0) {
     throw new ApiError(409, "mechanism_disabled", "Cannot rotate initial token when API_KEY is set.");
   }
 
