@@ -1,4 +1,4 @@
-const CACHE_NAME = "redirect-app-v1";
+const CACHE_NAME = "redirect-app-__BUILD_ID__";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -44,8 +44,14 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((res) => {
-          // Never cache redirects, Access login pages, or server errors
-          if (res.type === "opaqueredirect" || res.redirected || res.status !== 200) {
+          // Never cache redirects, Access login pages, or non-HTML responses
+          const contentType = res.headers.get("content-type") || "";
+          if (
+            res.type === "opaqueredirect" ||
+            res.redirected ||
+            res.status !== 200 ||
+            !contentType.includes("text/html")
+          ) {
             return res;
           }
           const clone = res.clone();

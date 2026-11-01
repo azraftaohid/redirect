@@ -3,8 +3,11 @@ import type { LinkRecord, ListLinksQuery } from "@redirect/shared";
 import { listLinks, createLink } from "@/api/client";
 import { LinkRow } from "@/components/LinkRow";
 import { LinkFormModal } from "@/components/LinkFormModal";
-import { QrCodeModal } from "@/components/QrCodeModal";
 import { normalizeUrlInput } from "@/utils/url";
+
+const QrCodeModal = React.lazy(() =>
+  import("@/components/QrCodeModal").then((m) => ({ default: m.QrCodeModal }))
+);
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -442,12 +445,14 @@ export function DashboardPage(): React.ReactElement {
       />
 
       {qrModalLink && (
-        <QrCodeModal
-          isOpen={Boolean(qrModalLink)}
-          onClose={() => setQrModalLink(null)}
-          slug={qrModalLink.slug}
-          targetUrl={qrModalLink.targetUrl}
-        />
+        <React.Suspense fallback={null}>
+          <QrCodeModal
+            isOpen={Boolean(qrModalLink)}
+            onClose={() => setQrModalLink(null)}
+            slug={qrModalLink.slug}
+            targetUrl={qrModalLink.targetUrl}
+          />
+        </React.Suspense>
       )}
     </div>
   );

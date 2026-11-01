@@ -140,4 +140,19 @@ describe("Request Dispatcher & App Serving", () => {
     const res = await fetchWorker("https://redirect.example.com/multi/segment/unknown/path");
     expect(res.status).toBe(404);
   });
+
+  it("carries X-Robots-Tag and X-Content-Type-Options on API v1 routes", async () => {
+    const res = await fetchWorker("https://redirect.example.com/api/v1/links");
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
+  it("returns 404 page for unknown slug with no-store and no links to /app/ (R7.2)", async () => {
+    const res = await fetchWorker("https://redirect.example.com/unknown-dead-link");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = await res.text();
+    expect(body).toContain("404 Not Found");
+    expect(body).not.toContain("/app");
+  });
 });

@@ -24,7 +24,9 @@ describe("API client & storage", () => {
     const after = Date.now();
 
     expect(getStoredToken()).toBe("test_secret_token_123");
+    expect(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe("test_secret_token_123");
     const setAt = getStoredTokenSetAt();
+    expect(localStorage.getItem(AUTH_TOKEN_SET_AT_STORAGE_KEY)).toBe(String(setAt));
     expect(setAt).toBeGreaterThanOrEqual(before);
     expect(setAt).toBeLessThanOrEqual(after);
   });

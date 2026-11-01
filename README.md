@@ -32,7 +32,7 @@ Every incoming request is dispatched by the Worker (`run_worker_first: true`) ac
 ### Prerequisites
 
 - Node.js 20+
-- `pnpm` (v10 or v11)
+- `pnpm` (v12)
 - Cloudflare account with Wrangler authenticated (`pnpm --filter @redirect/api exec wrangler login`)
 
 ### Installation
@@ -119,19 +119,25 @@ Redirect employs a zero-lockout lazy bootstrapping mechanism for API authenticat
    curl -i https://<your-domain>/api/v1/auth/verify
    ```
 
-   The API will respond with `401 Unauthorized`. This initial request triggers the Worker to automatically generate a secure 32-character Base62 token and store it in KV under the key `initial_token`.
+   The API will respond with `401 Unauthorized`. This initial request triggers the Worker to automatically generate a secure token in the format `rdir_initial_<secret>` (48-character Base62 secret) and store it in KV under the key `initial_token`.
 
 2. **Retrieve the token in production:**
 
    - Log in to the [Cloudflare Dashboard](https://dash.cloudflare.com/).
    - Navigate to **Storage & Databases** → **KV** → `AUTH_TOKENS`.
-   - View the value of the `initial_token` key and copy it.
+   - View the plaintext value of the `initial_token` key and copy it.
 
 3. **Retrieve the token in local development (`pnpm dev`):**
 
    ```bash
    pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
    ```
+
+### Token Storage Layout in KV
+
+For transparent operator visibility, tokens are stored in Workers KV (`AUTH_TOKENS`) using a self-indexing layout:
+- `initial_token`: Plaintext value `rdir_initial_<secret>`.
+- `token:<id>`: Plaintext value `rdir_<id>_<secret>` (where `<id>` is 10 chars Base62 and `<secret>` is 32 chars Base62). Token metadata (`{ name, createdAt, expiresAt, preview }`) is stored in the KV metadata header, enabling fast direct lookups, instant 1-op revocations without listing, and efficient prefix enumeration.
 
 ### Authenticating API Calls
 

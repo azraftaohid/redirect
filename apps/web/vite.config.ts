@@ -2,7 +2,8 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 function copy404Plugin(): Plugin {
   return {
@@ -16,6 +17,25 @@ function copy404Plugin(): Plugin {
           mkdirSync(destDir, { recursive: true });
         }
         copyFileSync(src404, dest404);
+      }
+    },
+  };
+}
+
+function injectBuildIdPlugin(): Plugin {
+  return {
+    name: "inject-build-id",
+    closeBundle() {
+      const distAppDir = path.resolve(import.meta.dirname, "dist/app");
+      const indexPath = path.resolve(distAppDir, "index.html");
+      const swPath = path.resolve(distAppDir, "sw.js");
+
+      if (existsSync(indexPath) && existsSync(swPath)) {
+        const indexHtml = readFileSync(indexPath, "utf8");
+        const buildId = createHash("sha256").update(indexHtml).digest("hex").slice(0, 10);
+        let swContent = readFileSync(swPath, "utf8");
+        swContent = swContent.replace(/__BUILD_ID__/g, buildId);
+        writeFileSync(swPath, swContent, "utf8");
       }
     },
   };
@@ -48,7 +68,7 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
-  plugins: [tailwindcss(), react(), copy404Plugin(), devRootRedirectPlugin()],
+  plugins: [tailwindcss(), react(), copy404Plugin(), injectBuildIdPlugin(), devRootRedirectPlugin()],
   server: {
     port: 5173,
     proxy: {

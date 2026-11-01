@@ -6,7 +6,10 @@ import { zeroFillDailySeries, formatCountryName } from "@/utils/stats";
 import { formatDisplayDate, isLinkExpired } from "@/utils/dates";
 import { DailyChart } from "@/components/DailyChart";
 import { LinkFormModal } from "@/components/LinkFormModal";
-import { QrCodeModal } from "@/components/QrCodeModal";
+
+const QrCodeModal = React.lazy(() =>
+  import("@/components/QrCodeModal").then((m) => ({ default: m.QrCodeModal }))
+);
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -421,12 +424,14 @@ export function LinkStatsPage(): React.ReactElement {
 
       {/* QR Modal */}
       {qrModalOpen && (
-        <QrCodeModal
-          isOpen={qrModalOpen}
-          onClose={() => setQrModalOpen(false)}
-          slug={link.slug}
-          targetUrl={link.targetUrl}
-        />
+        <React.Suspense fallback={null}>
+          <QrCodeModal
+            isOpen={qrModalOpen}
+            onClose={() => setQrModalOpen(false)}
+            slug={link.slug}
+            targetUrl={link.targetUrl}
+          />
+        </React.Suspense>
       )}
     </div>
   );

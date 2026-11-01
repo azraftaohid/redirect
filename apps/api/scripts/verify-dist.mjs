@@ -9,6 +9,9 @@ const requiredFiles = [
   resolve(distDir, "app/index.html"),
   resolve(distDir, "app/manifest.webmanifest"),
   resolve(distDir, "app/sw.js"),
+  resolve(distDir, "app/icon-192.png"),
+  resolve(distDir, "app/icon-512.png"),
+  resolve(distDir, "app/apple-touch-icon.png"),
   resolve(distDir, "404.html"),
 ];
 
@@ -46,6 +49,13 @@ if (inlineMatches.length > 0) {
   for (const m of inlineMatches) {
     console.error(`  ${m[0].slice(0, 100)}...`);
   }
+  process.exit(1);
+}
+
+// Verify that __BUILD_ID__ was replaced in sw.js
+const swContent = readFileSync(resolve(distDir, "app/sw.js"), "utf8");
+if (swContent.includes("__BUILD_ID__")) {
+  console.error("[verify-dist] ERROR: __BUILD_ID__ placeholder was not replaced in dist/app/sw.js.");
   process.exit(1);
 }
 

@@ -501,14 +501,34 @@ Apply these edits. They are justified changes, not drift.
 
 ## 7. Definition of Done (Part III)
 
-- [ ] B1–B22 fixed, each covered by a test or an explicit verification note.
-- [ ] Auth = 1 KV read for every principal kind; token create/rotate = 1 write; revoke = 1 delete; list = 1 list (+1 read for the initial entry).
-- [ ] `POST /links` = 1 D1 statement in the common case; `PATCH` = 1; `DELETE` = 1; `GET /links` = 1 batch; `GET /links/:id/stats` = 1 batch; reserved-segment requests = 0.
-- [ ] Dashboard toggle/edit cause zero list refetches; the stats view = 1 request per period change.
-- [ ] Any non-empty `API_KEY` authenticates; no format rule can lock the owner out.
-- [ ] SPA reloads never render blank (304 handling); QR PNG works under the production CSP.
-- [ ] No new bindings, services, paid features or manual dashboard steps; D1 rows written per click unchanged or lower.
-- [ ] `pnpm typecheck`, `pnpm test`, `pnpm build`, `verify-dist` green; Concept.md and README updated per R11.
+- [x] B1–B22 fixed, each covered by a test or an explicit verification note.
+- [x] Auth = 1 KV read for every principal kind; token create/rotate = 1 write; revoke = 1 delete; list = 1 list (+1 read for the initial entry).
+- [x] `POST /links` = 1 D1 statement in the common case; `PATCH` = 1; `DELETE` = 1; `GET /links` = 1 batch; `GET /links/:id/stats` = 1 batch; reserved-segment requests = 0.
+- [x] Dashboard toggle/edit cause zero list refetches; the stats view = 1 request per period change.
+- [x] Any non-empty `API_KEY` authenticates; no format rule can lock the owner out.
+- [x] SPA reloads never render blank (304 handling); QR PNG works under the production CSP.
+- [x] No new bindings, services, paid features or manual dashboard steps; D1 rows written per click unchanged or lower.
+- [x] `pnpm typecheck`, `pnpm test`, `pnpm build`, `verify-dist` green; Concept.md and README updated per R11.
+
+### Implementation Verification Summary
+
+1. **Test Suite:**
+   - API tests: 59 passed (100% passing across 6 suites).
+   - Web tests: 32 passed (100% passing across 6 suites).
+   - Total: 91 tests passing (baseline was 80).
+   - Strict TypeScript typechecking: 0 errors with `noUnusedLocals: true` and `noUnusedParameters: true` across all workspace packages.
+
+2. **Bundle Size & Code Splitting (Phase R9):**
+   - **Before:** Single monolithic entry chunk `608.53 kB` (gzip: `184.28 kB`) with Vite warning `(!) Some chunks are larger than 500 kB`.
+   - **After:** Entry chunk reduced to `463.66 kB` (gzip: `142.14 kB`), representing a **~23% gzip reduction** and **~145 kB uncompressed reduction**.
+   - Code-split route chunks: `ShareTargetPage` (7.70 kB), `SettingsPage` (12.50 kB), `LinkStatsPage` (17.54 kB), `QrCodeModal` + `qrcode` (27.41 kB), vendor charts (82.92 kB).
+   - Zero bundle warnings.
+
+3. **Hardening & Service Worker (Phase R7):**
+   - Service worker cache versioning dynamically injected with short hash `__BUILD_ID__` of built `index.html`.
+   - `verify-dist.mjs` enforces absence of unreplaced `__BUILD_ID__` and validates all PWA icons (`icon-192.png`, `icon-512.png`, `apple-touch-icon.png`).
+   - `404.html` decoupled from admin `/app/` links for clean public isolation.
+   - Comprehensive CSP, `X-Robots-Tag: noindex, nofollow`, and `X-Content-Type-Options: nosniff` headers enforced across both API and SPA routes.
 
 ---
 

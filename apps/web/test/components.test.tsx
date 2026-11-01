@@ -1,10 +1,9 @@
-import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { Button } from "../src/components/ui/button";
 import { Badge } from "../src/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "../src/components/ui/card";
-import { AuthProvider, useAuth } from "../src/context/AuthContext";
+import { AuthProvider } from "../src/context/AuthContext";
 import { AuthGate } from "../src/components/AuthGate";
 import { AccessExpiredBanner } from "../src/components/AccessExpiredBanner";
 import { DailyChart } from "../src/components/DailyChart";

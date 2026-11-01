@@ -18,7 +18,7 @@ export const slugSchema = z
     const res = validateSlug(val);
     if (!res.ok) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: res.error,
       });
     }
@@ -34,17 +34,29 @@ export const targetUrlSchema = z
       const parsed = new URL(val);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           message: "Target URL protocol must be either 'http:' or 'https:'",
         });
       }
     } catch {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "Target URL must be a valid absolute URL",
       });
     }
   });
+
+export const titleSchema = z
+  .string()
+  .trim()
+  .max(MAX_TITLE_LENGTH, `Title must be at most ${MAX_TITLE_LENGTH} characters`)
+  .transform((val) => (val === "" ? null : val))
+  .nullable()
+  .optional();
+
+export const statusCodeSchema = z.union(
+  REDIRECT_STATUS_CODES.map((code) => z.literal(code))
+);
 
 export const tagsSchema = z
   .array(
@@ -58,42 +70,39 @@ export const tagsSchema = z
   .max(MAX_TAGS, `Cannot exceed ${MAX_TAGS} tags`)
   .transform((tags) => Array.from(new Set(tags)));
 
-export const createLinkSchema = z.object({
+const linkBaseFields = {
   targetUrl: targetUrlSchema,
-  slug: slugSchema.optional(),
-  title: z
-    .string()
-    .trim()
-    .max(MAX_TITLE_LENGTH, `Title must be at most ${MAX_TITLE_LENGTH} characters`)
-    .nullable()
-    .optional(),
-  statusCode: z
-    .union([z.literal(301), z.literal(302), z.literal(307), z.literal(308)])
-    .optional(),
-  tags: tagsSchema.optional(),
-  isActive: z.boolean().optional(),
-  forwardQuery: z.boolean().optional(),
-  expiresAt: z.string().datetime().nullable().optional(),
+  slug: slugSchema,
+  title: titleSchema,
+  statusCode: statusCodeSchema,
+  tags: tagsSchema,
+  isActive: z.boolean(),
+  forwardQuery: z.boolean(),
+  expiresAt: z.iso.datetime().nullable(),
+};
+
+export const createLinkSchema = z.object({
+  targetUrl: linkBaseFields.targetUrl,
+  slug: linkBaseFields.slug.optional(),
+  title: linkBaseFields.title,
+  statusCode: linkBaseFields.statusCode.optional(),
+  tags: linkBaseFields.tags.optional(),
+  isActive: linkBaseFields.isActive.optional(),
+  forwardQuery: linkBaseFields.forwardQuery.optional(),
+  expiresAt: linkBaseFields.expiresAt.optional(),
 });
 export type CreateLinkInput = z.infer<typeof createLinkSchema>;
 
 export const updateLinkSchema = z
   .object({
-    targetUrl: targetUrlSchema.optional(),
-    slug: slugSchema.optional(),
-    title: z
-      .string()
-      .trim()
-      .max(MAX_TITLE_LENGTH, `Title must be at most ${MAX_TITLE_LENGTH} characters`)
-      .nullable()
-      .optional(),
-    statusCode: z
-      .union([z.literal(301), z.literal(302), z.literal(307), z.literal(308)])
-      .optional(),
-    tags: tagsSchema.optional(),
-    isActive: z.boolean().optional(),
-    forwardQuery: z.boolean().optional(),
-    expiresAt: z.string().datetime().nullable().optional(),
+    targetUrl: linkBaseFields.targetUrl.optional(),
+    slug: linkBaseFields.slug.optional(),
+    title: linkBaseFields.title,
+    statusCode: linkBaseFields.statusCode.optional(),
+    tags: linkBaseFields.tags.optional(),
+    isActive: linkBaseFields.isActive.optional(),
+    forwardQuery: linkBaseFields.forwardQuery.optional(),
+    expiresAt: linkBaseFields.expiresAt.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field must be provided for update",
@@ -120,7 +129,7 @@ export type StatsQuery = z.infer<typeof statsQuerySchema>;
 
 export const createTokenSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(64, "Name must be at most 64 characters"),
-  expiresAt: z.string().datetime().nullable().optional(),
+  expiresAt: z.iso.datetime().nullable().optional(),
 });
 export type CreateTokenInput = z.infer<typeof createTokenSchema>;
 

@@ -6,7 +6,6 @@ import {
   createToken,
   deleteToken,
   rotateInitialToken,
-  getStoredToken,
 } from "@/api/client";
 import { formatDisplayDate } from "@/utils/dates";
 import { Button } from "@/components/ui/button";
@@ -55,7 +54,7 @@ import {
 import { toast } from "sonner";
 
 export function SettingsPage(): React.ReactElement {
-  const { principal, updateActiveToken, logout } = useAuth();
+  const { token: activeToken, principal, updateActiveToken, logout } = useAuth();
 
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +82,9 @@ export function SettingsPage(): React.ReactElement {
   const [rotateAlertOpen, setRotateAlertOpen] = useState(false);
   const [rotating, setRotating] = useState(false);
 
-  const storedToken = getStoredToken() || "";
+  const storedToken = activeToken || "";
+  const hasInitialToken = tokens.some((t) => t.isInitial);
+  const minExpiry = new Date(Date.now() + 120_000).toISOString().slice(0, 16);
 
   const fetchTokens = useCallback(async () => {
     setLoading(true);
@@ -288,16 +289,18 @@ export function SettingsPage(): React.ReactElement {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRotateAlertOpen(true)}
-              className="h-8 gap-1.5 text-xs"
-              title="Rotate initial token in KV"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Rotate Initial</span>
-            </Button>
+            {hasInitialToken && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRotateAlertOpen(true)}
+                className="h-8 gap-1.5 text-xs"
+                title="Rotate initial token in KV"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Rotate Initial</span>
+              </Button>
+            )}
 
             <Button
               size="sm"
@@ -358,15 +361,27 @@ export function SettingsPage(): React.ReactElement {
                       </div>
                     </div>
 
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setTokenToDelete(t)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Revoke</span>
-                    </Button>
+                    {t.isInitial ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRotateAlertOpen(true)}
+                        className="h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Rotate</span>
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setTokenToDelete(t)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Revoke</span>
+                      </Button>
+                    )}
                   </div>
                 );
               })}
@@ -404,6 +419,7 @@ export function SettingsPage(): React.ReactElement {
               <Input
                 id="token-expires"
                 type="datetime-local"
+                min={minExpiry}
                 value={tokenExpiresAt}
                 onChange={(e) => setTokenExpiresAt(e.target.value)}
                 disabled={creating}
@@ -437,7 +453,7 @@ export function SettingsPage(): React.ReactElement {
               <span>{revealedTitle || "Token Secret"}</span>
             </DialogTitle>
             <DialogDescription>
-              Copy this token now. For security, you will not be able to see it again.
+              Copy this token now. It is also visible as the value of `token:&lt;id&gt;` (or `initial_token`) in your Cloudflare KV dashboard. For security, you will not be able to see it again here.
             </DialogDescription>
           </DialogHeader>
 

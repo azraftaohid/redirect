@@ -90,4 +90,18 @@ describe("Schemas", () => {
     expect(() => updateLinkSchema.parse({})).toThrow();
     expect(() => updateLinkSchema.parse({ title: "New Title" })).not.toThrow();
   });
+
+  it("validates slugSchema", () => {
+    expect(slugSchema.parse("valid-slug")).toBe("valid-slug");
+    expect(() => slugSchema.parse("invalid slug")).toThrow();
+    expect(() => slugSchema.parse("app")).toThrow();
+  });
+
+  it("normalizes empty string title to null in createLinkSchema", () => {
+    const res = createLinkSchema.parse({
+      targetUrl: "https://example.com",
+      title: "   ",
+    });
+    expect(res.title).toBeNull();
+  });
 });

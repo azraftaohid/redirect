@@ -57,12 +57,3 @@ export function isLinkExpired(expiresAt?: string | null): boolean {
   const exp = new Date(expiresAt).getTime();
   return !isNaN(exp) && exp <= Date.now();
 }
-
-/**
- * Determines if a scheduled start date is in the future.
- */
-export function isLinkScheduled(startsAt?: string | null): boolean {
-  if (!startsAt) return false;
-  const start = new Date(startsAt).getTime();
-  return !isNaN(start) && start > Date.now();
-}

@@ -78,9 +78,10 @@ interface RequestOptions extends RequestInit {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { token = getStoredToken(), headers: customHeaders, ...rest } = options;
+  const isStoredToken = options.token === undefined;
+  const token = isStoredToken ? getStoredToken() : options.token;
 
-  const headers = new Headers(customHeaders);
+  const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
 
   if (token) {
@@ -89,6 +90,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let res: Response;
   try {
+    const { token: _t, headers: _h, ...rest } = options;
     res = await fetch(path, {
       ...rest,
       headers,
@@ -117,6 +119,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   if (!res.ok) {
+    if (res.status === 401 && isStoredToken && token) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("redirect:unauthorized"));
+      }
+    }
+
     if (contentType.includes("application/json")) {
       const errorBody = (await res.json()) as ApiErrorBody;
       throw new ApiClientError(
@@ -167,6 +175,7 @@ export async function listLinks(
   if (query.limit) params.set("limit", String(query.limit));
   if (query.offset) params.set("offset", String(query.offset));
   if (query.search) params.set("search", query.search);
+  if (query.targetUrl) params.set("targetUrl", query.targetUrl);
   if (query.tag) params.set("tag", query.tag);
   if (query.isActive !== undefined) params.set("isActive", String(query.isActive));
   if (query.sortBy) params.set("sortBy", query.sortBy);

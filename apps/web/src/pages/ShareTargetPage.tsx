@@ -12,7 +12,6 @@ import {
   Share2,
   Copy,
   Check,
-  ExternalLink,
   Loader2,
   ArrowLeft,
   Info,
@@ -28,6 +27,7 @@ export function ShareTargetPage(): React.ReactElement {
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedExisting, setCopiedExisting] = useState(false);
+  const lastCheckedUrlRef = useRef<string>("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -45,15 +45,19 @@ export function ShareTargetPage(): React.ReactElement {
   }, []);
 
   async function checkIfAlreadyExists(url: string) {
-    const trimmed = url.trim();
-    if (!trimmed || !/^https?:\/\/.+/i.test(trimmed)) {
+    const normalized = normalizeUrlInput(url);
+    if (!normalized) {
       setExistingLink(null);
+      lastCheckedUrlRef.current = "";
       return;
     }
+    if (lastCheckedUrlRef.current === normalized) {
+      return;
+    }
+    lastCheckedUrlRef.current = normalized;
     try {
-      const res = await listLinks({ search: trimmed, limit: 10 });
-      const exact = res.data.find((l) => l.targetUrl === trimmed);
-      setExistingLink(exact || null);
+      const res = await listLinks({ targetUrl: normalized, limit: 1 });
+      setExistingLink(res.data[0] || null);
     } catch {
       setExistingLink(null);
     }
@@ -61,16 +65,8 @@ export function ShareTargetPage(): React.ReactElement {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    let target = targetUrl.trim();
-    if (!target) return;
-
-    if (!/^https?:\/\//i.test(target)) {
-      target = "https://" + target;
-    }
-
-    try {
-      new URL(target);
-    } catch {
+    const target = normalizeUrlInput(targetUrl);
+    if (!target) {
       toast.error("Invalid URL format");
       return;
     }
@@ -88,8 +84,14 @@ export function ShareTargetPage(): React.ReactElement {
       // Auto-copy to clipboard for frictionless mobile workflow
       const full = `${window.location.origin}/${res.slug}`;
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(full).catch(() => {});
-        setCopied(true);
+        try {
+          await navigator.clipboard.writeText(full);
+          setCopied(true);
+        } catch {
+          setCopied(false);
+        }
+      } else {
+        setCopied(false);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create short link");
@@ -111,6 +113,7 @@ export function ShareTargetPage(): React.ReactElement {
       toast.success("Copied to clipboard");
       setTimeout(() => setCopied(false), 2000);
     } catch {
+      setCopied(false);
       toast.error("Failed to copy");
     }
   }
@@ -124,6 +127,7 @@ export function ShareTargetPage(): React.ReactElement {
       toast.success(`Copied /${existingLink.slug} to clipboard`);
       setTimeout(() => setCopiedExisting(false), 2000);
     } catch {
+      setCopiedExisting(false);
       toast.error("Failed to copy");
     }
   }
@@ -216,6 +220,7 @@ export function ShareTargetPage(): React.ReactElement {
                     setTargetUrl("");
                     setTitle("");
                     setCustomSlug("");
+                    lastCheckedUrlRef.current = "";
                   }}
                   className="text-sm text-zinc-500 hover:text-zinc-900"
                 >

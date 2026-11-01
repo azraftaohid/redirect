@@ -8,7 +8,6 @@ import {
   Settings,
   Share2,
   LogOut,
-  ExternalLink,
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
