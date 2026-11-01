@@ -1,8 +1,16 @@
 # Redirect — Implementation Plan
 
-Step-by-step specification for an LLM coding agent to implement the **Redirect** platform (Backend + Frontend) in `/home/azraftaohid/codes/redirect/`. The product concept is in `/home/azraftaohid/Documents/Notes/Main/Projects/Redirect Dev Notes/Concept.md`. If this plan and the concept disagree, the concept's intent wins; report the discrepancy.
+Specification for an LLM coding agent working on the **Redirect** platform in `/home/coder/project/redirect/`. The product concept is `/home/coder/notes/redirect-dev-notes/Concept.md`. If this plan and the concept disagree, the concept's intent wins — **except** where Phase R11 explicitly amends the concept. Report any other discrepancy instead of guessing.
 
-Follow the phases in order. After each phase, run the verification listed for it before continuing.
+The project is **pre-release**: data formats, KV layout, API shapes, and the D1 schema need no backward compatibility. Prefer the cleanest design over migration shims.
+
+## How to Use This Plan
+
+1. Work through the Part III phases **in order** (R0 → R11). Each phase lists files, exact behavior, and a verification gate. Do not start the next phase until the gate passes.
+2. Keep each phase in its own commit (Conventional Commits, e.g. `fix(api): …`, `perf(api): …`, `refactor(web): …`).
+3. Toolchain: Node 20+ and the pnpm version pinned in root `package.json` (`packageManager`) must be on `PATH`. Do not hardcode machine-specific paths in code, scripts, or docs.
+4. Never weaken an Authoritative Decision (§1) to make a test pass. If a decision blocks a correct fix, stop and report.
+5. Part IV (future features) is **not** to be implemented. It is a backlog for later assessment.
 
 ---
 
@@ -10,778 +18,538 @@ Follow the phases in order. After each phase, run the verification listed for it
 
 | Part | Scope | Status |
 | :--- | :--- | :--- |
-| **Part I** | Monorepo, `@redirect/shared`, & `@redirect/api` (Phases 1–9) | ✅ **Completed** (49/49 tests passing) |
-| **Part II** | `@redirect/web` Frontend SPA & PWA (Phases F1–F8) | 📋 **Ready for Implementation** |
+| **Part I** | Monorepo, `@redirect/shared`, `@redirect/api` (Phases 1–9) | ✅ Completed — 49 workerd tests |
+| **Part II** | `@redirect/web` SPA & PWA (Phases F1–F8) | ✅ Completed — 31 jsdom tests |
+| **Part III** | Correctness, cost/latency, token storage redesign, cleanup (Phases R0–R12) | 📋 Ready for implementation |
+| **Part IV** | Future feature backlog | 🧭 For assessment only — do not implement |
 
 ---
 
-## 0. Authoritative Decisions (Do Not Deviate or "Improve")
+## 1. Authoritative Decisions (Do Not Deviate or "Improve")
 
-### Backend & Platform Decisions (`D1`–`D12`)
+### Backend & Platform (`D1`–`D12`)
 
 | # | Decision |
 | :-- | :-- |
 | D1 | One Cloudflare Worker + Static Assets. `run_worker_first: true`; the Worker dispatches every request explicitly. |
-| D2 | Assets config: `not_found_handling: "none"`, `html_handling: "none"` (exact file matching, no automatic index/trailing-slash behavior). Never use `single-page-application` mode. |
-| D3 | Token auth is the only application-level auth. The Worker never reads or trusts Cloudflare Access headers/JWTs. Zero Trust is optional and external. |
-| D4 | Tokens live in **KV** (`AUTH_TOKENS`), stored in plain text so the owner can read them in the Cloudflare dashboard. The owner must never be lockable out. |
-| D5 | No caching layer in front of D1. No "edge-fast" optimizations. A redirect taking hundreds of milliseconds is acceptable. |
-| D6 | Analytics = counters and daily rollups only (see Phase 3). **No raw per-click event table. No IP, User-Agent, city or device storage.** |
+| D2 | Assets config: `not_found_handling: "none"`, `html_handling: "none"`. Never use `single-page-application` mode. |
+| D3 | Token auth is the only application-level auth. The Worker never reads or trusts Cloudflare Access headers/JWTs. |
+| D4 | Tokens live in **KV** (`AUTH_TOKENS`) **in plain text** so the owner can read them in the Cloudflare dashboard. The owner must never be lockable out. (Key layout is redefined by **D13**.) |
+| D5 | No caching layer in front of D1. No "edge-fast" optimizations (no read replicas, no KV/Cache API mirror of links). Hundreds of ms per redirect is acceptable. |
+| D6 | Analytics = counters and daily rollups only. **No per-click event table. No IP, User-Agent, city or device storage.** |
 | D7 | Slugs are **case-sensitive** and **mutable**. Links are identified by stable `id`; API routes use `/links/:id`. |
 | D8 | Only `api` and `app` are reserved slugs (case-insensitive check). |
 | D9 | No private-IP/SSRF blocking (the Worker never fetches targets). Validate protocol, length and self-reference only. |
-| D10 | No CORS (same-origin). Do not add CORS middleware or a `CORS_ORIGIN` variable. |
-| D11 | Analytics failures must never affect a redirect. A D1 lookup failure returns `503`, never `404`. |
-| D12 | Use `PATCH` for partial updates. Do not implement `PUT`. |
+| D10 | No CORS (same-origin). No CORS middleware, no `CORS_ORIGIN` variable. |
+| D11 | Analytics failures never affect a redirect. A D1 lookup failure returns `503`, never `404`. |
+| D12 | `PATCH` for partial updates. No `PUT`. |
 
-### Frontend Decisions (`F1`–`F13`)
+### Frontend (`F1`–`F13`)
 
 | # | Decision |
 | :-- | :-- |
-| F1 | **Subpath isolation under `/app/`.** Vite builds with `base: "/app/"` and `build.outDir: "dist/app"`, producing `apps/web/dist/app/index.html` and `apps/web/dist/app/assets/*`. A standalone `404.html` is emitted to `apps/web/dist/404.html`. No root `/index.html` or root `/assets/*` directory may exist. |
-| F2 | **Strict `/app/` Service Worker scope.** The service worker MUST be served from `/app/sw.js` and registered with `{ scope: "/app/" }`. Never register a root-scoped service worker, as it would intercept short links (`/:slug`). |
-| F3 | **Zero Trust-compatible Web App Manifest & standard PNG icons.** Link manifest with `<link rel="manifest" href="/app/manifest.webmanifest" crossorigin="use-credentials">`. Include standard raster PNGs (`icon-192.png`, `icon-512.png`, `apple-touch-icon.png`) to fulfill Chromium installability criteria and iOS homescreen requirements. |
-| F4 | **Strict CSP compliance.** All `/app/*` responses carry `Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'`. Do not load external scripts, external icon/font CDNs, or use inline `<script>` tags. |
-| F5 | **Single source of truth via `@redirect/shared`.** Import constants, Zod schemas, `validateSlug`, `validateTargetUrl`, `generateRandomSlug`, and TypeScript interfaces (`LinkRecord`, `LinkStats`, `TokenInfo`, `Paginated<T>`, `ApiErrorBody`) directly from `@redirect/shared`. Do not duplicate validation regexes or types. |
-| F6 | **Token persistence & lazy bootstrap.** Store the bearer token in `localStorage` (`redirect_auth_token`). When `/app/` loads without a stored token, fire one background `GET /api/v1/auth/verify` (ignoring the expected `401`) so the Worker lazily generates `initial_token` in KV on first visit. |
-| F7 | **Zero Trust expired-session detection.** All API calls use `redirect: "manual"`. If a `/api/v1/*` call returns `res.type === "opaqueredirect"` (status 0), throws a CORS `TypeError` while `navigator.onLine` is true, or returns `text/html`, raise `AccessSessionExpiredError`. Do **not** wipe the stored bearer token in `localStorage`; surface a prompt reloading the page to re-authenticate with Access. |
-| F8 | **Client-side analytics zero-filling & dynamic dimensions.** Zero-fill missing UTC days in `LinkStats.daily` on the client. Render `country` and `referrer` breakdown sections **only** when those keys exist on `LinkStats.dimensions`. |
-| F9 | **Client-side QR generation.** Generate QR codes locally in the browser as `<svg>` / `data:image/png` (no third-party QR API requests). |
-| F10 | **UI component architecture, routing & charting.** React + TypeScript + Vite + Tailwind CSS + shadcn/ui components (`class-variance-authority`, Radix Dialog, Alert Dialog, Dropdown Menu, Switch, Label, Sonner toast). Use `wouter` (~1.5 KB, with `base: "/app"`) for routing. Use styled native `<select>` for status codes and sorts (avoiding Radix Select portal focus traps, heavy bundle, and jsdom polyfill friction). Use responsive single-tree row components rather than duplicate table/card render trees. For link analytics, render the daily clicks time-series chart with a lightweight, self-contained SVG component (columns for 7/30 days, area sparkline for 90/365 days, UTC days axis) avoiding heavy charting libraries (e.g. Recharts). |
-| F11 | **Service Worker cache & offline contract.** In `public/sw.js` (scoped to `/app/`), version cache (`redirect-app-v1`), precache `/app/index.html` on `install` with `skipWaiting()`, and cleanup old caches in `activate`. Strictly bypass `/app/sw.js` (never intercept SW update checks), external origins, and non-GET requests. For `/app/` navigations: network-first; pass through opaque redirects, redirected, or non-200 responses directly to the browser (never cache, never fall back to cache) so expired Access sessions reach login; fall back to cached `/app/index.html` **only** on true network failure. Serve `/app/assets/*` with `Cache-Control: public, max-age=31536000, immutable`, and serve `/app/sw.js`, `/app/index.html`, and extensionless SPA navigations with `Cache-Control: no-cache`. |
-| F12 | **Shared slug generator & date timezone safety.** Both `generateRandomSlug` and `generateValidRandomSlug` live in `@redirect/shared` so API and UI use the identical canonical generator. For HTML5 `<input type="datetime-local">`, use explicit helpers converting to/from local time (`YYYY-MM-DDTHH:mm`) and UTC ISO-8601 strings to prevent timezone offset truncation. |
-| F13 | **KV replication grace window & token safety.** KV writes take up to 60s to propagate across Cloudflare edge PoPs. Persist the creation/rotation timestamp in `localStorage` (`redirect_auth_token_set_at`). Do not aggressively wipe `localStorage` on a single transient 401 if a token was rotated or set within the last 60 seconds (even across browser reloads); display a retry prompt. |
+| F1 | Subpath isolation: Vite `base: "/app/"`, `build.outDir: "dist/app"`; standalone `dist/404.html`; no root `dist/index.html` or `dist/assets/`. |
+| F2 | Service worker served from `/app/sw.js`, registered with `{ scope: "/app/" }`. Never root-scoped. |
+| F3 | Manifest linked with `crossorigin="use-credentials"`; PNG icons 192/512 + `apple-touch-icon.png`. |
+| F4 | Strict CSP on `/app/*` (exact value in **D17**). No external scripts/fonts/CDNs, no inline `<script>`. **Never `fetch()` a `data:` or `blob:` URL**: `connect-src` falls back to `'self'` and blocks it. |
+| F5 | `@redirect/shared` is the single source of truth for constants, schemas, validators, slug/random generators and API types. Never duplicate validation regexes in the UI. |
+| F6 | Token in `localStorage` (`redirect_auth_token`). With no stored token, `/app/` fires one background unauthenticated `GET /api/v1/auth/verify` to lazily bootstrap `initial_token`. |
+| F7 | All API calls use `redirect: "manual"`. Opaque redirect / CORS `TypeError` while online / `text/html` on status < 500 → `AccessSessionExpiredError`. Never wipe the stored token for that error. |
+| F8 | Zero-fill the daily series on the client **using the server-supplied `range.from`/`range.to`**. Render a dimension card iff its key exists in `dimensions`. |
+| F9 | QR codes generated locally (SVG + canvas PNG). No third-party QR services. |
+| F10 | React + TS + Vite + Tailwind + shadcn-style primitives (Radix Dialog/AlertDialog/DropdownMenu/Switch/Label, Sonner). `wouter` with `base="/app"`. Native `<select>`. Single-tree responsive rows. Self-contained SVG chart (no chart libraries). |
+| F11 | SW: versioned cache name (see **D18**), precache `/app/index.html`, bypass `/app/sw.js`, external origins and non-GET. Navigations network-first; pass through opaque/redirected/non-200; fall back to cached shell only on network failure. `/app/assets/*` → `public, max-age=31536000, immutable`; `/app/sw.js`, `/app/index.html`, manifest, extensionless SPA routes → `no-cache`. |
+| F12 | Datetime inputs use explicit local ↔ UTC ISO helpers. |
+| F13 | 60 s KV propagation grace: persist `redirect_auth_token_set_at`; don't wipe a token on a 401 within 60 s of setting it. |
 
-Non-goals: multi-user, multi-domain, aliases/redirect history, export/import endpoints (use `wrangler d1 export`), unique-visitor analytics.
+### Part III Decisions (`D13`–`D20`) — new
+
+| # | Decision |
+| :-- | :-- |
+| D13 | **Id-embedded tokens, one KV key per token.** Token format `rdir_<id>_<secret>`. Custom tokens: key `token:<id>`, value = full plaintext token, metadata `{ name, createdAt, expiresAt, preview }`. Initial token: key `initial_token` (unchanged name, dashboard-friendly), value = `rdir_initial_<secret>`. Auth, revoke and rotate are each a single KV operation. No secondary indexes, no duplicate keys. |
+| D14 | **`API_KEY` accepts any non-empty string.** It is compared (constant-time, after trimming) **before** any token-format check. A format rule must never be able to lock the owner out. |
+| D15 | **Minimum D1 round-trips, no redundant reads.** Use `db.batch()` for independent statements, `INSERT … ON CONFLICT(slug) DO NOTHING RETURNING *` for creates, `UPDATE … RETURNING *` for updates, and `DELETE` + `meta.changes` for deletes. No pre-flight `SELECT`s whose only purpose is existence/uniqueness checking. |
+| D16 | **Every error path returns the JSON error envelope with the correct status.** Framework exceptions (e.g. Hono `HTTPException` for malformed JSON) are mapped, never surfaced as 500. |
+| D17 | `/app/*` CSP: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. `/app/*` and `/api/*` responses also carry `X-Robots-Tag: noindex, nofollow`. |
+| D18 | Service worker cache name embeds a **build id** injected at build time (`redirect-app-<buildId>`), so every deploy changes `sw.js` bytes, triggers an SW update, and purges stale hashed assets. |
+| D19 | **Client reads are minimal.** Mutations patch local state from the server's response instead of refetching lists; a page needs at most one API call per user action (plus the auth verify on boot). |
+| D20 | **Zero deployment friction, zero added cost.** No new bindings, services, paid features, or manual dashboard toggles. Every change must keep or reduce D1 rows read/written and KV operations. |
 
 ---
 
-## 1. Architecture
+## 2. Architecture (current, with Part III deltas)
 
-### Request Dispatch (`apps/api/src/index.ts`)
+### Request dispatch (`apps/api/src/index.ts`), evaluated in order on `url.pathname`
 
-Evaluated in this exact order using `new URL(request.url).pathname`:
-
-1. `/api/v1` or `/api/v1/*` → API router (Hono sub-app). Any other path starting with `/api` → JSON `404`.
-2. `/app` → `308` redirect to `/app/` (preserving query string).
+1. `/api/v1` or `/api/v1/*` → API Hono app. Any other `/api` or `/api/*` → JSON 404.
+2. `/app` → 308 to `/app/` (query preserved).
 3. `/app/*` → `serveApp()`.
-4. `/` → `handleRoot()`: valid `FALLBACK_URL` → `307`, else the 404 page.
-5. Single segment (one optional trailing `/`) that matches `SLUG_REGEX` against the **raw** path (no `decodeURIComponent`) → `handleRedirect()`. Non-`GET`/`HEAD` → `405` with `Allow: GET, HEAD`.
-6. Anything else → try `env.ASSETS.fetch(request)` for an exact static file (e.g. `/favicon.ico`); if it returns `404`, return the 404 page.
+4. `/` → `handleRoot()` (valid `FALLBACK_URL` → 307, else 404 page).
+5. Single segment (optional trailing `/`) matching `SLUG_REGEX` on the raw path:
+   - **R3 delta:** if the segment is a reserved slug (case-insensitive, e.g. `/APP`, `/Api`) → unknown-link handling (fallback/404) **without** a D1 query.
+   - Otherwise → `handleRedirect()` (non-GET/HEAD → 405 `Allow: GET, HEAD`).
+6. Anything else → exact static asset, else 404 page.
 
-The 404 page = body of the `/404.html` asset with status `404` (`env.ASSETS.fetch(new Request(new URL('/404.html', request.url)))`); if that asset is missing, return plain text `Not found` with status `404`.
+### Bindings (unchanged)
 
-### Bindings and Configuration
+`DB` (D1), `AUTH_TOKENS` (KV), `ASSETS` (Fetcher), `API_KEY` (secret, optional), `FALLBACK_URL`, `OWN_HOSTNAMES`, `ANALYTICS_ENABLED`, `ANALYTICS_DIMENSIONS` (vars).
 
-| Name | Type | Purpose |
-| :-- | :-- | :-- |
-| `DB` | D1 | Links and statistics. |
-| `AUTH_TOKENS` | KV | Tokens (see Phase 4). |
-| `ASSETS` | Fetcher | Static assets built from `apps/web/dist`. |
-| `API_KEY` | Secret, optional | Master token. When set, the initial-token mechanism is disabled. |
-| `FALLBACK_URL` | Var, optional | Redirect target for unknown/disabled/expired slugs and for `/`. |
-| `OWN_HOSTNAMES` | Var, optional | Comma-separated extra hostnames that count as "this redirector" for loop checks. |
-| `ANALYTICS_ENABLED` | Var, default `"true"` | `"false"` disables all analytics writes. |
-| `ANALYTICS_DIMENSIONS` | Var, default `""` | Comma-separated subset of `country`, `referrer`. Each adds one row written per counted click. |
+### KV layout after R2 (D13)
 
----
+| Key | Value | Metadata | TTL |
+| :-- | :-- | :-- | :-- |
+| `initial_token` | `rdir_initial_<32 base62>` | `{ createdAt }` | none |
+| `token:<10 base62 id>` | `rdir_<id>_<32 base62>` | `{ name, createdAt, expiresAt, preview }` | KV `expiration` = `expiresAt` when set |
 
-## 2. Target Repository Layout
+### Repository layout (unchanged except where noted)
 
 ```text
-/home/azraftaohid/codes/redirect/
-├── .gitignore
-├── README.md                          # operational runbook (completed)
-├── package.json
-├── pnpm-workspace.yaml
-├── tsconfig.base.json
-├── plan.md
-├── packages/shared/                   # ✅ completed (slug.ts moved in F1)
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── index.ts
-│       ├── constants.ts
-│       ├── schemas.ts                 # zod schemas + inferred types
-│       ├── validation.ts              # slug / target URL validators
-│       └── slug.ts                    # canonical Base62 generation
-└── apps/
-    ├── api/                           # ✅ completed
-    │   ├── package.json
-    │   ├── tsconfig.json
-    │   ├── vitest.config.ts
-    │   ├── wrangler.jsonc
-    │   ├── worker-configuration.d.ts
-    │   ├── .dev.vars.example
-    │   ├── migrations/0001_initial.sql
-    │   ├── scripts/
-    │   │   ├── ensure-assets.mjs      # dev/test asset stub
-    │   │   └── verify-dist.mjs        # predeploy build verifier
-    │   ├── src/
-    │   │   ├── index.ts               # request dispatcher
-    │   │   ├── types.ts
-    │   │   ├── errors.ts              # ApiError + error envelope
-    │   │   ├── auth/
-    │   │   │   ├── tokens.ts          # KV token logic
-    │   │   │   └── middleware.ts
-    │   │   ├── db/
-    │   │   │   ├── links.ts
-    │   │   │   └── stats.ts
-    │   │   ├── routes/
-    │   │   │   ├── links.ts
-    │   │   │   ├── tokens.ts
-    │   │   │   ├── stats.ts
-    │   │   │   ├── redirect.ts
-    │   │   │   └── app.ts             # serveApp + 404 page helper
-    │   │   └── utils/
-    │   │       ├── query.ts           # raw query merge
-    │   │       └── analytics.ts       # countable-click filter + recordClick
-    │   └── test/
-    │       ├── apply-migrations.ts
-    │       ├── validation.test.ts
-    │       ├── auth.test.ts
-    │       ├── links.test.ts
-    │       ├── redirect.test.ts
-    │       ├── analytics.test.ts
-    │       └── dispatch.test.ts
-    └── web/                           # 📋 Part II target layout
-        ├── package.json
-        ├── tsconfig.json
-        ├── vite.config.ts
-        ├── vitest.config.ts
-        ├── index.html                 # SPA entry (manifest with crossorigin="use-credentials")
-        ├── 404.html                   # standalone root 404 template copied to dist/404.html
-        ├── public/
-        │   ├── manifest.webmanifest   # served at /app/manifest.webmanifest
-        │   ├── sw.js                  # served at /app/sw.js (scope: /app/)
-        │   ├── icon-192.svg           # vector icon
-        │   ├── icon-512.svg
-        │   ├── icon-192.png           # raster PNG icons for Chromium PWA installability
-        │   ├── icon-512.png
-        │   └── apple-touch-icon.png   # iOS Safari homescreen icon
-        ├── src/
-        │   ├── main.tsx               # React root + SW registration
-        │   ├── App.tsx                # AuthGate wrapper + wouter switch + layout shell
-        │   ├── lib/
-        │   │   └── utils.ts           # cn helper (clsx + tailwind-merge)
-        │   ├── styles/
-        │   │   └── globals.css        # Tailwind CSS + shadcn theme variables (dark/light)
-        │   ├── api/
-        │   │   └── client.ts          # Typed API client + Access redirect detection
-        │   ├── context/
-        │   │   └── AuthContext.tsx    # Token state, verify, login, logout, bootstrap ping
-        │   ├── utils/
-        │   │   ├── stats.ts           # zeroFillDailySeries, formatUtcDay, country formatter
-        │   │   ├── dates.ts           # local datetime-local <-> ISO UTC converters
-        │   │   ├── share.ts           # extractSharedPayload for Web Share Target
-        │   │   └── qr.ts              # Client-side SVG/Canvas QR generator
-        │   ├── components/
-        │   │   ├── ui/                # shadcn/ui components (Radix primitives + native select)
-        │   │   │   ├── button.tsx
-        │   │   │   ├── input.tsx
-        │   │   │   ├── label.tsx
-        │   │   │   ├── dialog.tsx
-        │   │   │   ├── alert-dialog.tsx
-        │   │   │   ├── card.tsx
-        │   │   │   ├── badge.tsx
-        │   │   │   ├── switch.tsx
-        │   │   │   ├── dropdown-menu.tsx
-        │   │   │   ├── select.tsx     # Tailwind-styled accessible native <select>
-        │   │   │   └── sonner.tsx
-        │   │   ├── Layout.tsx         # Navigation bar, principal indicator, mobile nav
-        │   │   ├── AuthGate.tsx       # Unlock screen + first-run KV recovery guide
-        │   │   ├── AccessExpiredBanner.tsx
-        │   │   ├── LinkRow.tsx        # Responsive link row (desktop table / mobile card)
-        │   │   ├── LinkFormModal.tsx  # Create & Edit (with mutable slug & status warnings)
-        │   │   ├── QrCodeModal.tsx    # SVG preview + PNG/SVG download + copy
-        │   │   └── DailyChart.tsx     # Lean SVG time-series chart (no Recharts)
-        │   └── pages/
-        │       ├── DashboardPage.tsx  # Quick shorten, search/tag/sort toolbar, links list
-        │       ├── LinkStatsPage.tsx  # Daily SVG chart + conditional dimension breakdowns
-        │       ├── ShareTargetPage.tsx# /app/share one-tap mobile shortening flow
-        │       └── SettingsPage.tsx   # Token management, initial token rotation, revoke
-        └── test/
-            ├── setup.ts               # jsdom polyfills (ResizeObserver, matchMedia)
-            ├── share.test.ts
-            ├── stats.test.ts
-            ├── client.test.ts
-            └── components.test.tsx
+packages/shared/src/   constants.ts · schemas.ts · validation.ts · slug.ts (+ randomBase62, token helpers in R2) · index.ts
+apps/api/src/          index.ts · types.ts · errors.ts
+                       auth/{tokens,middleware}.ts
+                       db/{links,stats}.ts
+                       routes/{links,tokens,stats,redirect,app}.ts
+                       utils/{query,analytics}.ts            (utils/slug.ts removed in R8)
+apps/api/test/         apply-migrations · validation · auth · links · redirect · analytics · dispatch
+apps/web/src/          main.tsx · App.tsx · api/client.ts · context/AuthContext.tsx
+                       utils/{stats,dates,share,qr,url*}.ts   (*url.ts added in R5)
+                       components/{Layout,AuthGate,AccessExpiredBanner,LinkRow,LinkFormModal,QrCodeModal,DailyChart}.tsx
+                       components/ui/{button,input,label,dialog,alert-dialog,card,badge,switch,dropdown-menu}.tsx
+                       pages/{Dashboard,LinkStats,ShareTarget,Settings,NotFound}Page.tsx
+apps/web/test/         setup · share · stats · client · components · link-row · dashboard-debounce (+ qr in R10)
 ```
 
 ---
 
-## 3. Part I — Backend Implementation (Completed)
+## 3. Reassessment of the Previous Part III (O1–O6)
 
-All backend phases have been implemented, verified, and committed:
+The previous revision of this plan was reviewed for soundness, necessity, and safety:
 
-- [x] **Phase 1 — Workspace (`04645dc`):** Monorepo configured with `pnpm-workspace.yaml`, `tsconfig.base.json`, root scripts, and package skeletons.
-- [x] **Phase 2 — Shared Package `@redirect/shared` (`04645dc`):** Constants (`RESERVED_SLUGS`, `SLUG_REGEX`, `REDIRECT_STATUS_CODES`, limits), validators (`validateSlug`, `validateTargetUrl`, `parseOwnHostnames`), and Zod schemas/types (`createLinkSchema`, `updateLinkSchema`, `listLinksQuerySchema`, `statsQuerySchema`, `createTokenSchema`, `LinkRecord`, `LinkStats`, `TokenInfo`).
-- [x] **Phase 3 — D1 Schema (`e3ee70e`):** `apps/api/migrations/0001_initial.sql` with `links`, `link_daily_clicks` (`WITHOUT ROWID`), and `link_daily_dims` (`WITHOUT ROWID`). Unindexed counter columns enforce the strict write-cost budget.
-- [x] **Phase 4 — Authentication in KV (`e3ee70e`, `e6b28d3`):** Plaintext recovery-friendly KV storage, SHA-256 constant-time `safeEqual`, hoisted `BEARER_REGEX`, lazy `ensureInitialToken` on `401`, `/api/v1/auth/verify`, and `/api/v1/tokens` CRUD + `/api/v1/tokens/initial/rotate`.
-- [x] **Phase 5 — Links API (`e3ee70e`):** Full CRUD at `/api/v1/links` and `/api/v1/links/:id`, unbiased Base62 random slug generator with collision retries, escaped `LIKE` search, `json_each` tag filtering, and mutable slug support.
-- [x] **Phase 6 — Statistics API (`e3ee70e`, `f6e4b5c`):** `GET /api/v1/links/:id/stats` returning total clicks, date range, daily series, and only enabled dimensions from `ANALYTICS_DIMENSIONS`.
-- [x] **Phase 7 — Redirect Engine, App Serving & Analytics (`f6e4b5c`):** Top-level dispatcher in `src/index.ts`, byte-for-byte `mergeQuery`, bot/prefetch filter `isCountableClick`, batched `recordClick` via `ctx.waitUntil`, `serveApp` with SPA fallback and `APP_SECURITY_HEADERS`, and `503` on D1 lookup errors.
-- [x] **Phase 8 — Backend Test Suites (`f6e4b5c`):** 49 tests across 6 suites (`validation.test.ts`, `auth.test.ts`, `links.test.ts`, `redirect.test.ts`, `analytics.test.ts`, `dispatch.test.ts`) running on `@cloudflare/vitest-pool-workers`.
-- [x] **Phase 9 — README Runbook (`606bc5b`):** Root `README.md` covering setup, token bootstrap/recovery, optional Zero Trust, D1 analytics cost table, backups, and limitations.
-
-### Backend Definition of Done (Verified)
-
-- [x] `pnpm install` succeeds.
-- [x] `pnpm typecheck` passes across all workspace packages.
-- [x] `pnpm test` passes all 49 tests across all 6 suites, including `meta.rows_written` budget assertions (2 default, 3 with country, 4 with country + referrer).
-- [x] `pnpm db:migrate:local` succeeds on a local database.
-- [x] No table stores one row per click; no index exists on counter columns; no CORS code; no Access-header handling in the Worker.
-- [x] `README.md` runbook written and formatted.
-
----
-
-## 4. Part II — Frontend Implementation Plan (`apps/web`) (Completed)
-
-All frontend phases have been implemented, verified, and committed:
-
-- [x] **Phase F1 — Workspace, Build Pipeline & Static 404 (`bbd6efc`):** React 19 + Vite 6 + Tailwind v4 setup with standalone `/404.html`, vector/raster PWA icons, manifest with `crossorigin="use-credentials"`, and `verify-dist.mjs` verification.
-- [x] **Phase F2 — API Client, Auth Context & Zero Trust Resilience (`3f0b2b4`):** Typed API client with `redirect: "manual"`, `AccessSessionExpiredError`, non-destructive token preservation, 60s KV replication grace period, and collapsible `AuthGate` recovery guide.
-- [x] **Phase F3 — UI Primitives, Layout & Router (`ea3b431`):** Custom shadcn-styled primitives with Radix UI, responsive navigation with mobile bottom bar, Wouter router with `/app` subpath isolation, and `AccessExpiredBanner`.
-- [x] **Phase F4 — Links Dashboard & Link Management (`6254c13`):** Quick shorten bar, filter toolbar synced to URL search parameters, responsive `LinkRow`, optimistic status toggling, `LinkFormModal` with immutable slug & caching warnings, and `QrCodeModal` with SVG/PNG generators.
-- [x] **Phase F5 — Stats & Analytics Visualization (`db8f5d1`):** `zeroFillDailySeries`, UTC-consistent day labels, responsive pure SVG `DailyChart` (bars & sparkline area), interactive scrub tooltips, and country/referrer breakdowns.
-- [x] **Phase F6 — PWA, Service Worker & Web Share Target (`61c0858`):** `extractSharedPayload` for iOS/Android share sheets, `ShareTargetPage` one-tap shortening & native share, Service Worker registration, and Worker cache headers (`immutable` for hashed assets, `no-cache` for entrypoints).
-- [x] **Phase F7 — Token Management & Settings (`c98d734`):** Active session view, active token revocation warnings, token creation modal, initial token rotation in KV with automatic session re-keying, and one-time secret reveal dialog.
-- [x] **Phase F8 — Web Test Suite & Monorepo DoD (`371a195`):** Full Vitest + jsdom suite (22 tests passing), full monorepo typecheck (0 errors), and full test suite (71 tests passing).
-
-Configure `apps/web` as a React + TypeScript + Vite package that outputs directly into the asset structure expected by `apps/api/wrangler.jsonc` (`../web/dist`).
-
-1. **Move Canonical Slug Generator to `@redirect/shared`:**
-   - Create `packages/shared/src/slug.ts` exporting `ALPHABET`, `generateRandomSlug(length = 6)`, and `generateValidRandomSlug(length = 6)`.
-   - Re-export `generateRandomSlug` and `generateValidRandomSlug` from `packages/shared/src/index.ts`.
-   - Update `apps/api/src/utils/slug.ts` to `export { generateRandomSlug, generateValidRandomSlug } from "@redirect/shared";`.
-   - Add `"build": "tsc --noEmit"` (or `"build": "tsc"`) to `packages/shared/package.json`.
-
-2. **`apps/web/package.json`:**
-   - Dependencies: `react`, `react-dom`, `@redirect/shared` (`workspace:*`), `wouter`, `lucide-react`, `clsx`, `tailwind-merge`, `class-variance-authority`, `@radix-ui/react-dialog`, `@radix-ui/react-alert-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-switch`, `@radix-ui/react-label`, `sonner`, `qrcode`.
-     *(Note: Decision F10 avoids `@radix-ui/react-select` to prevent portal focus traps, heavy bundle, and jsdom polyfill issues; link redirect status code uses styled native `<select>`.)*
-   - DevDependencies: `typescript`, `vite`, `@vitejs/plugin-react`, `tailwindcss`, `@tailwindcss/vite` (or Tailwind PostCSS), `@types/react`, `@types/react-dom`, `@types/node`, `@types/qrcode`, `vitest`, `jsdom`, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`.
-   - Scripts:
-     - `"dev": "vite"`
-     - `"build": "tsc --noEmit && vite build"`
-     - `"typecheck": "tsc --noEmit"`
-     - `"test": "vitest run"`
-
-3. **`apps/web/tsconfig.json` & Path Aliases:**
-   - Extend `../../tsconfig.base.json`.
-   - Set `"jsx": "react-jsx"`, `"lib": ["ES2022", "DOM", "DOM.Iterable"]`.
-   - Configure `"baseUrl": "."` and `"paths": { "@/*": ["./src/*"] }` for `@/` path alias.
-
-4. **`apps/web/vite.config.ts`:**
-   - Set `base: "/app/"`.
-   - Set `build.outDir: "dist/app"` and `build.emptyOutDir: true`.
-   - Configure path alias: `resolve: { alias: { "@": path.resolve(__dirname, "./src") } }`.
-   - Configure `server`:
-     - `port: 5173`
-     - Proxy configuration:
-       - `"/api"`: `{ target: "http://127.0.0.1:8787", changeOrigin: false }`.
-       - `"^/(?!app|@|node_modules|src|public|favicon|.*\\..*)[^/]+/?$"`: `{ target: "http://127.0.0.1:8787", changeOrigin: false }` (proxies single-segment short links `/:slug` to Wrangler on port 8787 while allowing Vite internal assets, scripts, and `/app` to resolve locally).
-   - Add a small Vite `closeBundle` plugin hook in `vite.config.ts` that copies `apps/web/404.html` to `apps/web/dist/404.html` on every build so the root 404 asset is always present alongside `dist/app/`.
-
-5. **Standalone `apps/web/404.html`:**
-   - Self-contained HTML + inline CSS (no external JS/CSS dependencies so it works for any invalid root `/:slug` path without extra asset requests).
-   - Clean dark/light adaptive layout displaying `"404 Not Found — The requested short link does not exist, has expired, or has been disabled."`
-
-6. **`apps/web/index.html` & Test Title Alignment:**
-   - Title: `Redirect — Link Manager`.
-   - Viewport meta, theme-color meta, icon links (`/app/icon-192.svg`, `/app/icon-192.png`, `/app/apple-touch-icon.png`).
-   - Manifest link with credentials:
-     `<link rel="manifest" href="/app/manifest.webmanifest" crossorigin="use-credentials" />` (Decision F3).
-   - `<div id="root"></div>` and `<script type="module" src="/src/main.tsx"></script>`.
-   - Update `apps/api/scripts/ensure-assets.mjs` placeholder title to `<title>Redirect — Link Manager</title>`.
-   - Decouple `apps/api/test/dispatch.test.ts` to assert `expect(htmlRoot).toContain("<title>Redirect")` and `expect(htmlRoot).toContain('<div id="root">')` so tests verify structure rather than brittle exact title copy.
-
-7. **Distribution Verification & Scripts (`apps/api/scripts/verify-dist.mjs`):**
-   - Create `apps/api/scripts/verify-dist.mjs`:
-     - Asserts `apps/web/dist/app/index.html`, `apps/web/dist/app/manifest.webmanifest`, `apps/web/dist/app/sw.js`, and `apps/web/dist/404.html` exist.
-     - Asserts `apps/web/dist/index.html` and `apps/web/dist/assets/` do NOT exist at root of `dist`.
-     - Asserts `apps/web/dist/app/index.html` contains no inline `<script>` tags (enforcing strict CSP compliance).
-   - In `apps/api/package.json`: change `"predeploy"` from `node scripts/ensure-assets.mjs` to `node scripts/verify-dist.mjs` to prevent accidentally deploying an unbuilt placeholder to production.
-   - In root `package.json`:
-     - `"dev": "pnpm --parallel --filter @redirect/api --filter @redirect/web dev"`
-     - `"build": "pnpm --filter @redirect/web build && pnpm --filter @redirect/api build"`
-     - `"test": "pnpm --filter @redirect/api test && pnpm --filter @redirect/web test"`
-     - `"deploy": "pnpm --filter @redirect/web build && pnpm --filter @redirect/api deploy"`
-
-**Verify Phase F1:**
-- `pnpm install` succeeds.
-- `pnpm --filter @redirect/web build` succeeds and produces `apps/web/dist/app/index.html`, `apps/web/dist/app/assets/*`, and `apps/web/dist/404.html`.
-- `node apps/api/scripts/verify-dist.mjs` passes.
-- `pnpm --filter @redirect/api test` passes all tests.
+| Prev. item | Verdict | Reason | Replacement |
+| :-- | :-- | :-- | :-- |
+| **O1.1** Dual index `token_id:<id>` → raw token | ❌ Rejected | Doubles KV writes on create (writes are the scarcest free-tier KV quota, 1k/day); two non-atomic keys can orphan; still needs a list-scan fallback. Revoke is rare for a single user, so the original list scan was not a real cost problem. | **D13**: embed the id in the token → one key, O(1) auth/revoke, no index. |
+| **O1.2** Also write `token:<initialToken>` for 1-read auth; "self-heal" writes on auth | ❌ Rejected (**security regression**) | Creates two sources of truth. The documented recovery "delete `initial_token` in the dashboard" would no longer revoke the old token, because the shadow `token:` key keeps working. Self-heal puts KV writes on the hot auth path. | **D13**: `rdir_initial_…` is recognized by its id and looked up directly in `initial_token`: 1 read, one source of truth. |
+| **O1.3** Skip `ensureInitialToken` when a token was supplied | ❌ Rejected | Breaks recovery: a browser holding a stale token after the owner deleted `initial_token` would never trigger regeneration (the SPA only pings when it has *no* token). The saving is one edge-cached KV read, on failures only. | Keep bootstrap on every 401 (R2). |
+| **O2.1** Batch `COUNT` + page query | ✅ Kept | One round-trip instead of two; same rows read. | R3.1 |
+| **O2.2** Direct INSERT, catch UNIQUE error | ✅ Kept, improved | Correct, but matching exception strings is brittle. | R3.2: `ON CONFLICT(slug) DO NOTHING RETURNING *` (null row ⇒ conflict). |
+| **O2.3** `UPDATE … RETURNING *` | ✅ Kept, improved | The previous version still pre-read the link; that read is also unnecessary. | R3.3: PATCH is **one statement**. |
+| **O2.4** Direct DELETE | ✅ Kept | Removes a read. | R3.4 |
+| **O2.5** Batch stats queries | ✅ Kept, extended | The SPA also calls `GET /links/:id` alongside stats and refetches both on every period change. | R3.5: stats response embeds the link → 1 request, 1 round-trip. |
+| **O3.1** Fetch `/app/index.html` directly for `/app/` | ✅ Kept (minor) | Saves one in-process asset lookup. The real bug in `serveApp` was missed (304 → empty 200). | R1.4 |
+| **O3.2** Case-insensitive `/APP`, `/API` routing | ⚠️ Replaced | Reserved slugs can never exist, so the current 404 is already correct; routing `/API/v1/...` into Hono would still miss its case-sensitive routes. Only the wasted D1 read matters. | R3.6: reserved segment ⇒ skip D1. |
+| **O4.1** `forwardQuery` default `true` in modal | ✅ Kept | Real contract bug (Concept §1.2). | R5.1 |
+| **O4.2** Shared validators in modal | ✅ Kept | Real bug (reserved slugs / self-loops accepted client-side). | R5.2 |
+| **O4.3** Clickable tag chips | ✅ Kept | Clicking a tag currently navigates to stats; there is no other way to set a tag filter. | R5.4 |
+| **O4.4** "Recently updated" sort | ✅ Kept | Trivial gap. | R5.5 |
+| **O4.5** Quick-shorten copy + QR | ✅ Kept, clarified | The spec was vague ("open QR if user clicks the toast"). | R5.6: Sonner action buttons. |
+| **O4.6** Zero-fill with server bounds | ✅ Kept, simplified | Drop the `days` parameter entirely. | R5.8 |
+| **O5** Tests | ✅ Kept, expanded | | R10 |
+| **O6** Zero friction/cost | ✅ Kept | | D20 |
+| Doc defects | ❌ Fixed | The previous plan claimed Vite 6 (actual 8), listed non-existent `ui/select.tsx` & `ui/sonner.tsx`, hardcoded a machine-specific `PATH`, and counted "8 bugs" without listing them. | This document. |
 
 ---
 
-### Phase F2 — API Client, Auth Context & Zero Trust Resilience
+## 4. Verified Defect Inventory
 
-Implement a strictly typed API client and authentication state layer in `apps/web/src/api/` and `apps/web/src/context/`.
+Items marked 🔬 were reproduced against the Workers runtime (`@cloudflare/vitest-plugin`) on 2026-11-01. The rest were confirmed by reading the code.
 
-1. **Token Storage (`src/api/client.ts`):**
-   - Storage key constants:
-     - `AUTH_TOKEN_STORAGE_KEY = "redirect_auth_token"`
-     - `AUTH_TOKEN_SET_AT_STORAGE_KEY = "redirect_auth_token_set_at"`
-   - Helpers:
-     - `getStoredToken(): string | null`
-     - `getStoredTokenSetAt(): number` (`Number(localStorage.getItem(AUTH_TOKEN_SET_AT_STORAGE_KEY) || 0)`)
-     - `setStoredToken(token: string): void` (stores `token` and sets `AUTH_TOKEN_SET_AT_STORAGE_KEY = Date.now().toString()`)
-     - `clearStoredToken(): void` (removes both keys from `localStorage`)
-
-2. **Error Classes (`src/api/client.ts`):**
-   - `ApiClientError extends Error`:
-     - `status: number`
-     - `code: string` (from `ApiErrorBody["error"]["code"]`, e.g. `"unauthorized"`, `"slug_taken"`, `"validation_error"`, `"initial_token_protected"`, `"mechanism_disabled"`)
-     - `details?: unknown`
-   - `AccessSessionExpiredError extends Error`:
-     - Thrown when an API call fails due to Cloudflare Zero Trust Access session expiration:
-       - `response.type === "opaqueredirect"` or `response.status === 0` (browser blocked follow or returned opaque redirect under `redirect: "manual"`), OR
-       - `fetch` throws a `TypeError` while `navigator.onLine === true` (cross-origin IdP redirect blocked by CORS), OR
-       - `response.headers.get("content-type")?.includes("text/html")` on status < 500 (Access HTML login page returned).
-       *(Note: HTML responses with status ≥ 500 represent Worker crashes or Cloudflare edge gateway errors, and throw `ApiClientError(status, "server_error")` instead).*
-     - **Important (Decision F7):** Never call `clearStoredToken()` when `AccessSessionExpiredError` occurs.
-
-3. **Typed API Methods (`src/api/client.ts`):**
-   - All requests set `Accept: "application/json"`, `credentials: "same-origin"`, `redirect: "manual"`, and `Authorization: Bearer ${token}` (when a token is available or passed explicitly).
-   - Endpoints:
-     - `verifyAuth(candidateToken?: string)` → `GET /api/v1/auth/verify` → `{ principal: { kind: "env" | "token" | "initial"; id: string; name: string } }`
-     - `bootstrapInitialTokenPing()` → `GET /api/v1/auth/verify` without an `Authorization` header (swallows the expected `401` response; used once on mount when no token is stored so the Worker's `authMiddleware` executes `ensureInitialToken(env)`).
-     - `listLinks(query: Partial<ListLinksQuery>)` → `GET /api/v1/links?...` → `Paginated<LinkRecord>`
-     - `getLink(id: string)` → `GET /api/v1/links/:id` → `LinkRecord`
-     - `createLink(input: CreateLinkInput)` → `POST /api/v1/links` → `LinkRecord`
-     - `updateLink(id: string, input: UpdateLinkInput)` → `PATCH /api/v1/links/:id` → `LinkRecord`
-     - `deleteLink(id: string)` → `DELETE /api/v1/links/:id` → `{ deleted: true; id: string }`
-     - `getLinkStats(id: string, days?: number)` → `GET /api/v1/links/:id/stats?days=...` → `LinkStats`
-     - `listTokens()` → `GET /api/v1/tokens` → `{ data: TokenInfo[] }`
-     - `createToken(input: CreateTokenInput)` → `POST /api/v1/tokens` → `TokenInfo & { token: string }`
-     - `deleteToken(id: string)` → `DELETE /api/v1/tokens/:id` → `{ deleted: true; id: string }`
-     - `rotateInitialToken()` → `POST /api/v1/tokens/initial/rotate` → `{ token: string; id: "initial"; name: string; isInitial: true; preview: string }`
-
-4. **Auth Context (`src/context/AuthContext.tsx`) & Unlock Screen (`src/components/AuthGate.tsx`):**
-   - State: `status: "loading" | "unauthenticated" | "authenticated"`, `principal`, `accessExpired: boolean`, `error: string | null`.
-   - On mount:
-     - If `getStoredToken()` exists: call `verifyAuth()`.
-       - On `200`: set `status = "authenticated"` and `principal`.
-       - On `401`:
-         - If `Date.now() - getStoredTokenSetAt() < 60_000` (KV replication grace period persisted across reloads): do NOT wipe token; show toast *"KV propagation in progress across edge locations. Click to retry."* and keep state as `"authenticated"`.
-         - Otherwise: call `clearStoredToken()`, set `status = "unauthenticated"`.
-       - On `AccessSessionExpiredError`: keep token in `localStorage`, set `accessExpired = true`.
-     - If no stored token exists: set `status = "unauthenticated"` and fire `bootstrapInitialTokenPing()` once in the background (Decision F6).
-   - `login(rawToken: string)`: trims input, calls `verifyAuth(rawToken)`, and on success calls `setStoredToken(rawToken)` and transitions to `"authenticated"`.
-   - `updateActiveToken(newToken: string)`: calls `setStoredToken(newToken)` in-place (used when rotating `initial_token`).
-   - `logout()`: calls `clearStoredToken()` and resets state to `"unauthenticated"`.
-   - **`AuthGate.tsx` UI:**
-     - Clean password/token input with show/hide toggle and "Unlock" submit button.
-     - Collapsible **"Where do I find my token?"** section explaining:
-       1. **API_KEY mode:** If you set the `API_KEY` environment secret in `wrangler.jsonc` or Cloudflare dashboard, enter that secret value.
-       2. **Production KV:** Cloudflare Dashboard → **Storage & Databases** → **KV** → `AUTH_TOKENS` → key `initial_token`.
-       3. **Local dev:** `pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local`.
-       4. **Recovery:** Deleting `initial_token` in KV regenerates it automatically on the next visit to `/app/`.
-
-**Verify Phase F2:**
-- `pnpm --filter @redirect/web typecheck` passes.
+| ID | Sev. | Area | Defect | Fix |
+| :-- | :-- | :-- | :-- | :-- |
+| B1 🔬 | **P0** | Auth | `API_KEY` containing `+ / =`, spaces, or shorter than 16 chars can never authenticate (`TOKEN_REGEX` runs first). Because `API_KEY` disables the initial token, this is a **total lockout** (e.g. with `openssl rand -base64 32`). | R1.1 |
+| B2 🔬 | **P0** | Web/API | SPA shell revalidation (`If-None-Match`) on `/app/` or any deep route returns **200 with an empty body**, so the page renders blank on reload once the browser has the ETag cached. `serveApp` rewrites the asset's 304 into a 200. | R1.4 |
+| B3 | **P0** | Web | QR "Download PNG" and "Copy image" call `fetch(dataUrl)`, which the production CSP (`connect-src` ← `'self'`) blocks. Works in dev (no CSP), broken in production. | R1.6 |
+| B4 🔬 | P1 | API | Malformed JSON body → 500 `internal_error` (Hono `HTTPException` not mapped). | R1.2 |
+| B5 🔬 | P1 | Tokens | `expiresAt` < 60 s in the future → 500 (KV rejects `expiration`); a past `expiresAt` is accepted and creates a dead token. | R1.3 |
+| B6 🔬 | P1 | Links | PATCH with an unchanged past `expiresAt` → 400. The edit modal always resends `expiresAt`, so **no field of an expired link can be edited** without clearing its expiry. | R1.5 + R4.3 |
+| B7 | P1 | Web | The edit modal sends `tags: undefined` when all tags are removed, so tags can never be cleared. | R4.3 |
+| B8 | P1 | Web | The stats page "Period Clicks" card shows the all-time total (`stats.totalClicks`), labeled "Last N days". | R1.7 |
+| B9 | P1 | Web | Toggling a link's active switch triggers **two to three full list refetches** (optimistic update, success, and rollback each call `fetchLinks`). Each refetch = 1 KV read + 1–2 D1 queries. | R4.1 |
+| B10 | P2 | Web | The create/edit modal defaults `forwardQuery` to `false` (concept & DB default is on). | R5.1 |
+| B11 | P2 | Web | The modal validates slugs with its own regex; reserved slugs (`api`, `app`), over-length slugs and self-referencing targets pass client validation. Random slug length is hardcoded to 8. | R5.2, R5.3 |
+| B12 | P2 | Web | Settings shows "Revoke" on the initial token (API returns 409) and a "Rotate Initial" button even when `API_KEY` mode disables it. The reveal dialog claims the token can't be seen again (it can, in KV). | R4.5 |
+| B13 | P2 | Web | If a token is revoked or expires mid-session, every call toasts an error and the user is never returned to the unlock screen. | R4.4 |
+| B14 | P2 | Web | After rotating the initial token, Settings still displays the old stored token (read once at render, not from state). | R4.4 |
+| B15 | P2 | Web | Referrer `"(direct)"` (what the API stores) is shown raw; the UI maps `""`/`"direct"` instead. Country `"XX"` renders as a broken flag / "Unknown Region". Dimension cards are hidden when the array is empty (spec: show "No data in this period"). | R5.7 |
+| B16 | P2 | Web | The Share Target duplicate check uses substring search with `limit: 10` and exact-matches client-side, so it misses exact matches when there are >10 substring hits. It also marks "copied" even when the clipboard write failed. | R5.9 |
+| B17 | P2 | Web | Clicking a tag chip navigates to the stats page (the event bubbles to the row click). | R5.4 |
+| B18 | P3 | API | Reserved case variants (`/APP`, `/Api`) cost a D1 query to return 404. | R3.6 |
+| B19 | P3 | Web | The SW caches *any* `/app/*` navigation response under `/app/index.html` (e.g. opening the manifest URL in a tab poisons the shell). Old hashed assets accumulate forever because the cache name never changes. | R7.3 |
+| B20 | P3 | Web | `animate-in`, `fade-in`, `zoom-in-95` etc. are no-ops (no animation plugin installed). | R7.5 |
+| B21 | P3 | Web | The search clear button has no accessible name (a test depends on `name: ""`). | R5.10 |
+| B22 | P3 | Docs | README says pnpm v10/v11 (the repo pins pnpm 12) and describes a "32-character Base62" initial token (actual: `rdir_` + 48 hex). | R11 |
 
 ---
 
-### Phase F3 — App Shell, History Router & Design System
+## 5. Part III — Implementation Phases
 
-Build a responsive, accessible UI shell scoped under `/app/` using Tailwind CSS and shadcn/ui.
+### Phase R0 — Repository Hygiene (no behavior change)
 
-1. **Router & Subpath Isolation (`src/App.tsx` via `wouter`):**
-   - Use `wouter` configured with base path `/app` (`<Router base="/app">`):
-     - Route `/` (maps to `/app/` and `/app`) → `DashboardPage`
-     - Route `/links/:id` → `LinkStatsPage`
-     - Route `/share` → `ShareTargetPage` (Web Share Target destination)
-     - Route `/settings` → `SettingsPage` (KV API token management)
-     - Default wildcard `*` → in-app 404 view displaying `"Page Not Found"` with a button back to `/app/`.
-   - `wouter` handles `<Link href="...">` pushState navigation, query strings, and back/forward browser history seamlessly with minimal footprint (~1.5 KB).
+1. The working tree has uncommitted changes outside this plan: `package.json` (`packageManager` `pnpm@11.2.2` → `pnpm@12.16.1`) and `pnpm-lock.yaml` (a new `packageManagerDependencies` header). **Ask the owner** whether to commit or revert them; do not silently include them in a feature commit.
+2. Ensure exactly one plan exists. If `/home/coder/notes/redirect-dev-notes/plan.md` exists, it is a stale copy produced by an earlier session; ask the owner before deleting it.
+3. Run `pnpm install`, `pnpm typecheck`, `pnpm test` and record the baseline (expected: 49 api + 31 web passing).
 
-2. **Design System & Styling (`src/lib/utils.ts` & `src/styles/globals.css`):**
-   - Implement `cn(...inputs)` utility in `src/lib/utils.ts` combining `clsx` and `tailwind-merge`.
-   - Configure Tailwind CSS and shadcn CSS variables in `src/styles/globals.css` (`--background`, `--foreground`, `--card`, `--primary`, `--muted`, `--border`, `--radius`) supporting automatic dark/light mode via `@media (prefers-color-scheme: dark)` and `color-scheme: light dark`.
-   - System font stack (`system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`) and monospace font stack (`ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`) for slugs, URLs, and tokens — zero external font requests (Decision F4).
-   - Responsive layout:
-     - Desktop: sticky top navigation bar (`Links`, `Tokens & Settings`, active principal badge, `Lock / Sign out`), max-width container (`1100px`).
-     - Mobile: compact header + touch-friendly controls (minimum `44px` tap targets) for effortless mobile use.
-
-3. **Core shadcn/ui Primitives (`src/components/ui/`):**
-   - Add core components: `button.tsx`, `input.tsx`, `label.tsx`, `dialog.tsx`, `alert-dialog.tsx`, `card.tsx`, `badge.tsx`, `switch.tsx`, `dropdown-menu.tsx`, `select.tsx` (accessible Tailwind-styled native `<select>`), `sonner.tsx`.
-   - Setup `<Toaster />` from `sonner` at the root layout for non-blocking feedback (`"Short link copied to clipboard"`, `"Link updated"`).
-   - `AccessExpiredBanner.tsx`: banner shown when `accessExpired` is true, offering a one-click `"Reload & Re-authenticate"` button (`window.location.reload()`) without clearing the stored token.
-
-**Verify Phase F3:**
-- `pnpm --filter @redirect/web typecheck` passes.
+**Gate:** baseline green; owner decisions on items 1–2 recorded.
 
 ---
 
-### Phase F4 — Links Dashboard: Create, Edit, Rename, Filter & QR Code
+### Phase R1 — P0/P1 Correctness Fixes
 
-Implement the primary link management workflow in `src/pages/DashboardPage.tsx`, `src/components/LinkFormModal.tsx`, and `src/components/QrCodeModal.tsx`.
+**R1.1 — `API_KEY` lockout (B1, D14)**: `apps/api/src/auth/tokens.ts`, `apps/api/src/auth/middleware.ts`
+- In `authenticate(env, token)`: first, if `env.API_KEY?.trim()` is non-empty and `await safeEqual(token, env.API_KEY.trim())` → return `{ kind: "env", id: "env", name: "Environment API key" }`. Apply token-format checks only after that.
+- In `authMiddleware`: remove the `TOKEN_REGEX.test(token)` pre-filter; pass any extracted non-empty token to `authenticate`. Reject header tokens longer than 512 chars before hashing.
+- `extractToken`: keep `Bearer` and `X-API-Key`; trim.
 
-1. **Quick Shorten Bar (Top of Dashboard):**
-   - Single-line form on desktop (stacked on mobile): `Target URL` input + optional `Custom slug` input + `"Shorten"` button + `"More options…"` button (which opens `LinkFormModal` pre-filled with the current inputs).
-   - Validates `targetUrl` with `validateTargetUrl(url, [window.location.hostname])` and `slug` (if non-empty) with `validateSlug(slug)` from `@redirect/shared`.
-   - On creation (`POST /api/v1/links`):
-     - Attempts copying the new short URL (`${window.location.origin}/${created.slug}`) to clipboard with toast notification (safely handled with try/catch fallback), triggers a list refetch (`loadLinks()`, preserving pagination and sort order), and shows a quick action to view its QR code.
+**R1.2 — Map framework errors (B4, D16)**: `apps/api/src/errors.ts`
+- In `handleApiError`: `if (err instanceof HTTPException)` (from `hono/http-exception`) → status `err.status`, code `err.status === 400 ? "bad_request" : "http_error"`, message `err.message`, header `Cache-Control: no-store`. Only unknown errors become 500 (and are logged).
 
-2. **Full Create / Edit Modal (`src/components/LinkFormModal.tsx`):**
-   - Supports both **Create** (`POST /api/v1/links`) and **Edit** (`PATCH /api/v1/links/:id`).
-   - Fields:
-     - `targetUrl` (required, validated against `validateTargetUrl(val, [window.location.hostname])`).
-     - `slug` (optional on create — blank auto-generates 6-char Base62; required on edit):
-       - Uses `generateRandomSlug` from `@redirect/shared`.
-       - **Case-sensitive hint:** `"Case-sensitive (e.g. Docs and docs are distinct)."`.
-       - **Mutable slug warning on Edit:** When `slug !== originalLink.slug`, display an inline warning alert: `"Renaming the slug frees '/<oldSlug>' immediately. The old link will return 404 (no redirect alias is kept). Click statistics will be preserved."`
-     - `title` (optional, max `MAX_TITLE_LENGTH` = 200 chars).
-     - `tags` (comma/Enter-separated chip input; normalized trimmed lowercase, max `MAX_TAGS` = 10 tags, each ≤ `MAX_TAG_LENGTH` = 32 chars).
-     - `statusCode` styled native `<select>` (Decision F10):
-       - `307 — Temporary Redirect (Default, preserves method)`
-       - `302 — Found (Temporary)`
-       - `308 — Permanent Redirect (Preserves method)`
-       - `301 — Moved Permanently`
-       - **Caching warning:** When `301` or `308` is selected, display an inline note: `"Browsers cache permanent redirects (max-age=3600). Repeat clicks from the same browser will not be counted in analytics, and target changes propagate slowly."`
-     - `forwardQuery` checkbox (default `true`: `"Forward incoming query parameters to target URL"`).
-     - `isActive` checkbox (default `true`: `"Link is active and resolves redirects"`).
-     - `expiresAt` (`<input type="datetime-local">` + `"Clear expiry"` button):
-       - Uses `src/utils/dates.ts`: converts backend UTC ISO string to local `YYYY-MM-DDTHH:mm` for `<input>` prefill (`toLocalDatetimeInputValue(link.expiresAt)`), and converts local `<input>` value back to UTC ISO-8601 on submit (`fromLocalDatetimeInputValue(val)`), or sends `null` on edit when cleared.
-   - Error handling:
-     - `409 slug_taken`: highlight the `slug` input with `"This slug is already in use."`
-     - `400 invalid_target_url` / `invalid_slug` / `invalid_expiry` / `validation_error`: display the server message inline.
+**R1.3 — Token expiry validation (B5)**: `packages/shared/src/schemas.ts`, `apps/api/src/routes/tokens.ts`
+- `createTokenSchema.expiresAt`: ISO datetime or null. The route rejects values earlier than `now + 120 s` with `400 invalid_expiry` ("Token expiry must be at least 2 minutes in the future"). The 2-minute floor keeps a safe margin over KV's 60 s minimum `expiration`.
+- Always set KV `expiration = Math.floor(Date.parse(expiresAt) / 1000)` when `expiresAt` is set (now guaranteed valid).
 
-3. **Search, Filter & Sort Toolbar (`src/pages/DashboardPage.tsx`):**
-   - Synchronize filter state bidirectionally with URL search parameters (`?search=&tag=&status=&sortBy=&sortOrder=&page=`):
-     - Search input (`300ms` debounce).
-     - Active Tag filter badge (with `"× Clear"` button) + suggestions from known tags.
-     - Status filter segmented control: `All` (`undefined`), `Active` (`"true"`), `Disabled` (`"false"`).
-     - Sort selector (styled native `<select>`):
-       - Newest first (`sortBy=createdAt`, `sortOrder=desc`)
-       - Oldest first (`sortBy=createdAt`, `sortOrder=asc`)
-       - Most clicked (`sortBy=clickCount`, `sortOrder=desc`)
-       - Recently updated (`sortBy=updatedAt`, `sortOrder=desc`)
-       - Slug A–Z (`sortBy=slug`, `sortOrder=asc`)
+**R1.4 — SPA shell conditional requests (B2)**: `apps/api/src/routes/app.ts`
+- Rewrite `serveApp`:
+  1. If `pathname === "/app/"` → fetch `/app/index.html` directly (single lookup), carrying the original request's headers so conditional requests still work.
+  2. Otherwise fetch the exact asset; if it is 404, the method is GET/HEAD and the last segment has no `.`, fetch `/app/index.html` with the original headers.
+  3. When serving the shell for a fallback path: if the shell response is **304**, return 304 (no body) with the shell's headers; if 200, return 200 with the body; any other status passes through unchanged. **Never** synthesize a 200 from a non-200.
+  4. Apply security headers (D17) and Cache-Control rules (F11) to every response, including 304.
 
-4. **Responsive Links List & Single-Tree Row Component (`src/components/LinkRow.tsx`):**
-   - Render links using a single responsive `LinkRow` component (avoids duplicate desktop/mobile trees, duplicate DOM nodes, and duplicate event handlers):
-     - **Desktop view:** Tabular row with short URL, target & title, badges/tags, metrics, and inline action buttons.
-     - **Mobile view:** Card-style layout with minimum 44px tap targets.
-   - Each link displays:
-     - Short URL (`/${link.slug}`) in bold monospace + **Copy** button + external test link (`href="/${link.slug}" target="_blank" rel="noopener noreferrer"`).
-     - Title (if set) and `targetUrl`.
-     - Status badges: `Disabled` (`!link.isActive`), `Expired` (past `expiresAt`), `Expires <date>`, and HTTP status pill (`307`, etc.).
-     - Tag chips (clicking a tag applies the tag filter).
-     - Metrics summary: **`<N> clicks`** (links to `/app/links/${link.id}`) and `Last clicked <relative time>`.
-     - Action buttons:
-       - **Primary (always visible):** **Copy** short URL and **Stats** (navigates to `/app/links/${link.id}`).
-       - **Secondary (inline on desktop, grouped in shadcn `DropdownMenu` on mobile):** **QR Code** (`QrCodeModal`), **Edit** (`LinkFormModal`), and **Delete** (confirms via shadcn `AlertDialog` → `DELETE /api/v1/links/:id`).
-       - **Enable / Disable** quick toggle: shadcn `Switch` (`PATCH /api/v1/links/:id` with `{ isActive: !link.isActive }`).
-   - Pagination footer: `"Showing X–Y of Z links"` with `Previous` and `Next` buttons (`limit = 20`).
+**R1.5 — PATCH expiry semantics (B6)**: `apps/api/src/routes/links.ts`
+- `expiresAt` in PATCH: `null` clears; a provided value must be in the future. Because clients send only changed fields (R4.3), an untouched past expiry is never resent. Document this contract in a route comment.
+- Create (`POST`) keeps the "must be in the future" rule.
 
-5. **Client-Side QR Code Modal (`src/components/QrCodeModal.tsx` & `src/utils/qr.ts`):**
-   - Uses shadcn `Dialog` primitive.
-   - Generates a QR code for `${window.location.origin}/${link.slug}` locally in the browser (`qrcode.toString(..., { type: "svg" })` and `qrcode.toDataURL(..., { width: 512, margin: 2 })`).
-   - Renders the crisp SVG preview inline.
-   - Provides **"Download PNG"**, **"Download SVG"**, and **"Copy Short Link"** buttons.
+**R1.6 — QR PNG under CSP (B3, F4)**: `apps/web/src/utils/qr.ts`, `apps/web/src/components/QrCodeModal.tsx`
+- Replace `generateQrPngDataUrl` + `fetch(dataUrl)` with `generateQrPngBlob(text, width = 1024): Promise<Blob>` using `QRCode.toCanvas(canvas, text, opts)` and `canvas.toBlob(..., "image/png")`.
+- Generate the PNG **lazily** (on "Download PNG" / "Copy image" click); open the modal with the SVG only.
+- Keep `downloadBlob` (an object URL on an `<a download>` is allowed by the CSP).
 
-**Verify Phase F4:**
-- `pnpm --filter @redirect/web typecheck` and `pnpm --filter @redirect/web build` succeed.
+**R1.7 — Period clicks KPI (B8)**: `apps/web/src/pages/LinkStatsPage.tsx`
+- KPI cards: **Total clicks** (`link.clickCount`), **Clicks in period** (sum of `daily`), **Peak day** (max day + count, "—" if zero), **Last clicked**. Move status code / forward-query info into header badges.
+
+**Gate:** `pnpm typecheck && pnpm test`; the R10 tests for B1, B2, B4, B5, B6 pass.
 
 ---
 
-### Phase F5 — Link Analytics & Time-Series Visualization
+### Phase R2 — Token Storage Redesign (D13)
 
-Implement `src/pages/LinkStatsPage.tsx`, `src/components/DailyChart.tsx`, and `src/utils/stats.ts`.
+Files: `packages/shared/src/slug.ts`, `packages/shared/src/schemas.ts`, `apps/api/src/auth/tokens.ts`, `apps/api/src/auth/middleware.ts`, `apps/api/src/routes/tokens.ts`, `apps/web/src/components/AuthGate.tsx`.
 
-1. **Zero-Fill & UTC Date Utilities (`src/utils/stats.ts`):**
-   - `zeroFillDailySeries(daily: Array<{ day: string; clicks: number }>, from: string, to: string): Array<{ day: string; clicks: number }>`
-     - Iterates day-by-day in UTC from `from` (`YYYY-MM-DD`) to `to` (`YYYY-MM-DD`) inclusive using `Date.UTC`, looking up click counts from a `Map` and defaulting missing days to `0`.
-   - `formatUtcDay(dayStr: string): string`:
-     - Parses `[year, month, day]` and formats with `new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" })` to strictly prevent negative UTC timezones (e.g. UTC-5) from shifting dates backwards by one calendar day.
-   - `formatCountryName(code: string): string`:
-     - Returns `"Unknown / Unspecified"` for `"XX"`.
-     - Uses `new Intl.DisplayNames(["en"], { type: "region" }).of(code)` (with try/catch fallback to `code`) so `"BD"` displays as `"Bangladesh (BD)"`, `"US"` as `"United States (US)"`, etc.
+**R2.1 — Random primitive.** In `packages/shared/src/slug.ts`, extract the unbiased rejection-sampling loop into `randomBase62(length: number): string`; `generateRandomSlug` delegates to it.
 
-2. **Statistics Page (`src/pages/LinkStatsPage.tsx`):**
-   - Loads `getLink(id)` and `getLinkStats(id, days)` in parallel.
-   - Header: Back to Links button, short link `/${link.slug}` with Copy & QR buttons, target URL, and Edit Link button.
-   - Period selector pills: `7 days`, `30 days` (default), `90 days`, `365 days`.
-   - Summary KPI cards using shadcn `<Card>`:
-     - **Total All-Time Clicks** (`stats.totalClicks`)
-     - **Clicks in Period** (sum of `daily` over the selected range)
-     - **Peak Day in Period** (max day and count)
-     - **Last Clicked** (formatted timestamp or `"Never"`)
-   - **Daily Clicks SVG Chart (`src/components/DailyChart.tsx`, Decision F10):**
-     - Custom lightweight SVG component avoiding heavy charting libraries (e.g. Recharts):
-       - Clearly label the horizontal axis as **"UTC Days"**.
-       - **7 and 30 day ranges:** Render discrete vertical SVG column bars with minimum spacing and tap/hover tooltips showing `YYYY-MM-DD: N clicks`.
-       - **90 and 365 day ranges:** Render an SVG continuous area/sparkline `<path>` with touch/mouse scrubbing indicator (avoids sub-pixel <0.8px bars on mobile screens where 365 discrete columns are unreadable).
-       - Horizontal reference gridlines and dynamic Y-axis scale labels.
-   - **Conditional Dimension Breakdowns (Decision F8):**
-     - Check `stats.dimensions?.country` and `stats.dimensions?.referrer`.
-     - If `stats.dimensions?.country` is defined: render **Top Countries** card (list of top 10 values with horizontal proportion bars and click counts, or `"No country data in this period"` if empty array).
-     - If `stats.dimensions?.referrer` is defined: render **Top Referrers** card (list of top 10 hostnames / `(direct)` with proportion bars and click counts).
-     - If neither is defined in `stats.dimensions`, do not render the breakdown section (show a subtle footer note that `country` and `referrer` dimensions can be enabled via `ANALYTICS_DIMENSIONS` in `wrangler.jsonc`).
+**R2.2 — Token format** (`apps/api/src/auth/tokens.ts`):
+```ts
+export const TOKEN_PREFIX = "rdir_";
+export const TOKEN_ID_LENGTH = 10;        // custom token ids
+export const TOKEN_SECRET_LENGTH = 32;    // ~190 bits
+export const INITIAL_TOKEN_ID = "initial";
+export const TOKEN_FORMAT = /^rdir_([A-Za-z0-9]{1,16})_([A-Za-z0-9]{32})$/;
 
-**Verify Phase F5:**
-- `pnpm --filter @redirect/web typecheck` passes.
+generateToken(id: string): string  // `rdir_${id}_${randomBase62(32)}`
+parseToken(raw: string): { id: string } | null
+maskToken(raw: string): string     // `rdir_${id}_…${last4}`
+```
+Remove `generateTokenId` (hex) and `TOKEN_REGEX`.
 
----
+**R2.3 — `authenticate(env, token)`** (after the API_KEY check from R1.1):
+1. `parseToken(token)`; null → return null.
+2. `id === "initial"`: if `API_KEY` is set → null. Else `stored = await KV.get("initial_token")`; `safeEqual(stored, token)` → `{ kind: "initial", id: "initial", name: "Initial token" }`.
+3. Otherwise: `{ value, metadata } = await KV.getWithMetadata<TokenMeta>("token:" + id)`; require `value` and `safeEqual(value, token)`; if `metadata.expiresAt` is in the past → null. Return `{ kind: "token", id, name: metadata.name }`.
 
-### Phase F6 — PWA, Service Worker (`/app/` Scope) & Web Share Target
+Result: exactly **one KV read** per authenticated request for every principal kind.
 
-Implement installable PWA support and mobile one-tap link shortening under `/app/`.
+**R2.4 — `ensureInitialToken(env)`.** Skip when `API_KEY` is set. Read `initial_token`; if it is missing **or** doesn't match `TOKEN_FORMAT` with id `initial`, write a fresh `generateToken("initial")` with metadata `{ createdAt }`, and `console.warn` when replacing a malformed value. This also upgrades any pre-R2 value automatically, with no manual steps. Keep calling it from the middleware on **every** 401 (see §3, O1.3).
 
-1. **Web App Manifest (`apps/web/public/manifest.webmanifest`):**
-   ```json
-   {
-     "id": "/app/",
-     "name": "Redirect — Link Manager",
-     "short_name": "Redirect",
-     "description": "Manage short links, QR codes, and click analytics.",
-     "start_url": "/app/",
-     "scope": "/app/",
-     "display": "standalone",
-     "background_color": "#0f172a",
-     "theme_color": "#2563eb",
-     "icons": [
-       {
-         "src": "/app/icon-192.png",
-         "sizes": "192x192",
-         "type": "image/png",
-         "purpose": "any"
-       },
-       {
-         "src": "/app/icon-512.png",
-         "sizes": "512x512",
-         "type": "image/png",
-         "purpose": "any"
-       },
-       {
-         "src": "/app/icon-512.png",
-         "sizes": "512x512",
-         "type": "image/png",
-         "purpose": "maskable"
-       },
-       {
-         "src": "/app/icon-192.svg",
-         "sizes": "192x192",
-         "type": "image/svg+xml",
-         "purpose": "any"
-       }
-     ],
-     "share_target": {
-       "action": "/app/share",
-       "method": "GET",
-       "enctype": "application/x-www-form-urlencoded",
-       "params": {
-         "title": "title",
-         "text": "text",
-         "url": "url"
-       }
-     }
-   }
-   ```
-   *(Note: Chromium PWA installability requires at least one 192x192 and 512x512 PNG. `apple-touch-icon.png` is provided in `public/` and linked in `index.html` for iOS homescreen).*
+**R2.5 — Routes** (`apps/api/src/routes/tokens.ts`):
+- `POST /tokens`: `id = randomBase62(10)`, `token = generateToken(id)`, `put("token:" + id, token, { metadata: { name, createdAt, expiresAt, preview: maskToken(token) }, expiration? })`. One write. Response `TokenInfo & { token }`.
+- `GET /tokens`: the initial entry (when `API_KEY` is unset and `initial_token` exists, via `getWithMetadata`), then a single `list({ prefix: "token:" })` (follow `cursor` only while `list_complete` is false). Build `TokenInfo` purely from key name + metadata (no value reads). Sort by `createdAt` desc after the initial entry.
+- `DELETE /tokens/:id`: `id === "initial"` → 409 `initial_token_protected` (unchanged). An `id` not matching `^[A-Za-z0-9]{10}$` → 404. Otherwise `delete("token:" + id)` and return `{ deleted: true, id }` (idempotent; no read, no list).
+- `POST /tokens/initial/rotate`: 409 `mechanism_disabled` when `API_KEY` is set; else `put("initial_token", generateToken("initial"), { metadata: { createdAt } })`. One write; the old token stops working once KV propagates (≤ 60 s).
+- `TokenInfo` in shared keeps its shape: `{ id, name, createdAt, expiresAt, preview, isInitial? }`.
 
-2. **Service Worker (`apps/web/public/sw.js` & Registration in `src/main.tsx`):**
-   - **Registration (`src/main.tsx`):**
-     ```ts
-     if ("serviceWorker" in navigator && import.meta.env.PROD) {
-       window.addEventListener("load", () => {
-         navigator.serviceWorker
-           .register("/app/sw.js", { scope: "/app/" })
-           .catch(() => {});
-       });
-     }
-     ```
-   - **Worker Implementation (`public/sw.js`, Decisions F2 & F11):**
-     ```javascript
-     const CACHE_NAME = "redirect-app-v1";
+**R2.6 — Dashboard copy.** AuthGate help: "Your token is the value of the `initial_token` key (or of any `token:<id>` key)." Remove references to `token:<rawToken>`.
 
-     self.addEventListener("install", (event) => {
-       event.waitUntil(
-         caches.open(CACHE_NAME).then((cache) => cache.addAll(["/app/index.html"])).then(() => self.skipWaiting())
-       );
-     });
-
-     self.addEventListener("activate", (event) => {
-       event.waitUntil(
-         caches.keys().then((keys) =>
-           Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-         ).then(() => self.clients.claim())
-       );
-     });
-
-     self.addEventListener("fetch", (event) => {
-       const url = new URL(event.request.url);
-
-       // 1. Strictly bypass non-GET, external origins, and sw.js itself (prevents intercepting updates)
-       if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
-       if (url.pathname === "/app/sw.js") return;
-       if (!url.pathname.startsWith("/app/")) return;
-
-       // 2. Cache-first with runtime caching for immutable hashed assets
-       if (url.pathname.startsWith("/app/assets/")) {
-         event.respondWith(
-           caches.match(event.request).then((cached) => {
-             if (cached) return cached;
-             return fetch(event.request).then((res) => {
-               if (res.status === 200) {
-                 const clone = res.clone();
-                 caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
-               }
-               return res;
-             });
-           })
-         );
-         return;
-       }
-
-       // 3. Navigation requests: Network-first, direct passthrough for redirects/errors
-       if (event.request.mode === "navigate") {
-         event.respondWith(
-           fetch(event.request)
-             .then((res) => {
-               // Never cache redirects, Access login pages, or server errors
-               if (res.type === "opaqueredirect" || res.redirected || res.status !== 200) {
-                 return res;
-               }
-               const clone = res.clone();
-               caches.open(CACHE_NAME).then((c) => c.put("/app/index.html", clone));
-               return res;
-             })
-             .catch(() => caches.match("/app/index.html"))
-         );
-       }
-     });
-     ```
-   - **Complete Cache-Control Rules in `apps/api/src/routes/app.ts`:**
-     - For `/app/assets/*` with status 200: set `Cache-Control: public, max-age=31536000, immutable`.
-     - For `/app/sw.js`, `/app/index.html`, and extensionless SPA navigations: set `Cache-Control: no-cache` to ensure users always receive the newest service worker and app shell immediately.
-
-3. **Share Payload Extractor (`src/utils/share.ts`) & Page (`src/pages/ShareTargetPage.tsx`):**
-   - `extractSharedPayload(searchParams: URLSearchParams): { targetUrl: string; title: string }`:
-     - Reads `rawUrl = searchParams.get("url")?.trim()`, `rawText = searchParams.get("text")?.trim()`, `rawTitle = searchParams.get("title")?.trim()`.
-     - If `rawUrl` starts with `http://` or `https://`, use it as `targetUrl`.
-     - Else if `rawText` contains an `https?://[^\s<>"]+` match, extract that match as `targetUrl` (stripping trailing punctuation like `.`, `,`, `)`), and if `rawTitle` is empty, use any remaining text in `rawText` as `title`.
-     - Else set `targetUrl = rawUrl || rawText || ""`.
-   - `ShareTargetPage.tsx` (`/app/share`):
-     - Preserves URL query parameters across `AuthGate` if arriving unauthenticated.
-     - Pre-populates `targetUrl` and `title` from `extractSharedPayload`.
-     - Deduplication check: before creating, queries `listLinks({ search: targetUrl })` and checks for an exact target match. If found, shows existing link immediately with a notification.
-     - Lets the user tap **"Shorten Now"** (6-char random Base62 slug) or customize slug/tags/expiry.
-     - Once created: displays the short link prominently with an explicit **"Copy Short Link"** button (never auto-copies on load without user gesture), **"Share Short Link"** (`navigator.share` fallback), QR preview, and **"Go to Dashboard"** button.
-   - **iOS Workflow Note:**
-     - Web Share Target is supported on Android and ChromeOS, but unsupported by Safari on iOS. For iOS devices, users can install an Apple Shortcut calling `POST /api/v1/links` with a Bearer token from Settings.
-
-**Verify Phase F6:**
-- `pnpm --filter @redirect/web build` outputs `dist/app/manifest.webmanifest` and `dist/app/sw.js`.
+**Gate:** the rewritten auth suite (R10.1) passes; `GET /tokens` performs exactly 1 `list` (+1 `getWithMetadata` for the initial entry); `DELETE` performs exactly 1 `delete`.
 
 ---
 
-### Phase F7 — Token Management & Security Settings View
+### Phase R3 — D1 Round-trip & Read Reduction (D15)
 
-Implement `src/pages/SettingsPage.tsx` for managing KV API tokens.
+**R3.1 — `listLinks`** (`apps/api/src/db/links.ts`): build `countStmt` and `dataStmt`, then run `const [countRes, dataRes] = await db.batch([countStmt, dataStmt])`. Add an exact-match `targetUrl` filter (`target_url = ?`) to `listLinksQuerySchema` (used by R5.9). Cap `search` at 200 chars and `tag` at `MAX_TAG_LENGTH` in the schema.
 
-1. **Current Session Card (shadcn `<Card>`):**
-   - Shows the authenticated principal from `AuthContext` (`principal.name`, `principal.kind`: `"Initial recovery token"`, `"Named API token"`, or `"Environment API_KEY secret"`).
-   - Includes a **"Sign Out / Lock Device"** button.
+**R3.2 — Create** (`db/links.ts`, `routes/links.ts`):
+```sql
+INSERT INTO links (id, slug, target_url, title, status_code, tags, is_active, forward_query,
+                   expires_at, click_count, last_clicked_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+ON CONFLICT(slug) DO NOTHING
+RETURNING *
+```
+- `createLinkRecord` returns `LinkRecord | null` (null ⇒ slug conflict).
+- Custom slug: null → 409 `slug_taken`.
+- Auto slug: up to 5 attempts at `DEFAULT_SLUG_LENGTH`, then 2 attempts at +1, then 500 `slug_generation_failed`. No `SELECT` before inserting.
+- Remove `getLinkBySlug` (no remaining callers).
 
-2. **Tokens List (`GET /api/v1/tokens`):**
-   - Table/list of tokens rendered with shadcn `<Card>` or table styles:
-     - `name` + shadcn `Badge` (`Initial Token` if `isInitial: true`).
-     - Masked `preview` in monospace (`rdir_ab12...cd34`).
-     - `createdAt` and `expiresAt` (`"Never"` or formatted date / `"Expired"` badge).
-     - Actions:
-       - For `id === "initial"`: **"Rotate Initial Token"** button (`POST /api/v1/tokens/initial/rotate`, confirms via shadcn `AlertDialog`).
-       - For regular tokens: **"Revoke"** button (`DELETE /api/v1/tokens/:id`, confirms via shadcn `AlertDialog`).
-       - **Active Token Self-Revocation Warning:** If the token being revoked matches the currently active token in `localStorage`, the `AlertDialog` displays a clear warning: *"Warning: Revoking this token will immediately log out your current session."*
+**R3.3 — Update = one statement** (`db/links.ts`, `routes/links.ts`):
+- `updateLinkRecord(db, id, input): Promise<LinkRecord | null>` builds the `SET` list from provided fields, always sets `updated_at`, and runs `UPDATE links SET … WHERE id = ? RETURNING *` with `.first()`.
+- Route: validate target URL/expiry/slug from the body only; call `updateLinkRecord`; null → 404; an error containing `UNIQUE constraint failed: links.slug` → 409 `slug_taken`. No pre-read.
 
-3. **Create Token Modal / Form (`POST /api/v1/tokens`):**
-   - Modal dialog using shadcn `Dialog`:
-     - Inputs: `name` (required, 1–64 chars, e.g., `"iPhone Shortcut"`, `"Laptop CLI"`) and optional `expiresAt` date picker.
-   - On `201 Created`:
-     - Display a prominent modal containing the full `token` string with a **"Copy Token & Continue"** button and notice: *"Copy this token now. For security, the API only returns the full token once at creation time (it remains viewable in your Cloudflare KV dashboard)."*
+**R3.4 — Delete** (`routes/links.ts`): `const deleted = await deleteLinkRecord(db, id)`; `!deleted` → 404. No pre-read. (FK cascades remove rollups; those deletes count as rows written, as already documented.)
 
-4. **Rotate Initial Token Flow:**
-   - Confirmation dialog using shadcn `AlertDialog` explaining that rotating invalidates the previous `initial_token`.
-   - On confirm (`POST /api/v1/tokens/initial/rotate`):
-     - Display the new initial token in a modal with an explicit **"Copy Token & Continue"** button.
-     - If `principal.kind === "initial"`, call `updateActiveToken(res.token)` in `AuthContext` so the current browser session transitions to the new token without interruption.
-     - If the backend returns `409 mechanism_disabled` (because `API_KEY` secret is set), display the message clearly.
+**R3.5 — Stats = one request, one round-trip** (`db/stats.ts`, `routes/stats.ts`, shared types):
+- New `LinkStats` shape:
+  ```ts
+  interface LinkStats {
+    link: LinkRecord;
+    range: { days: number; from: string; to: string };
+    daily: Array<{ day: string; clicks: number }>;
+    dimensions: { country?: DimRow[]; referrer?: DimRow[] }; // keys present only if enabled
+  }
+  ```
+  `linkId`, `totalClicks` and `lastClickedAt` are dropped because they duplicate `link`.
+- `getLinkStats(db, id, days, enabledDims)` batches `SELECT * FROM links WHERE id = ?`, the daily query, and one query per enabled dimension; it returns null if the link row is missing (route → 404).
+- Extract `parseEnabledDimensions(raw?: string): AnalyticsDimension[]` into `apps/api/src/utils/analytics.ts`; use it in both `recordClick` and the stats route.
 
-5. **Eventual Consistency Notice:**
-   - Include a subtle info note on the page: *"Tokens are stored in Cloudflare Workers KV. Creation, rotation, and revocation may take up to 60 seconds to propagate across all global edge locations."*
+**R3.6 — Reserved segment short-circuit** (`apps/api/src/index.ts`): before calling `handleRedirect`, if `RESERVED_SLUGS` contains `segment.toLowerCase()`: GET/HEAD → the unknown-link response; other methods → 405. Factor the FALLBACK_URL-or-404 logic into a shared helper `respondUnknownLink(request, env)` used by `handleRedirect`, `handleRoot` and this branch. No D1 query.
 
-**Verify Phase F7:**
-- `pnpm --filter @redirect/web typecheck` passes.
-
----
-
-### Phase F8 — Frontend Unit Tests & Full-Stack Verification
-
-Write automated tests in `apps/web/test/` and run the full monorepo test suite.
-
-1. **Test Environment & Setup (`apps/web/vitest.config.ts` & `apps/web/test/setup.ts`):**
-   - Configure Vitest with `environment: "jsdom"` and `setupFiles: ["./test/setup.ts"]`.
-   - In `apps/web/test/setup.ts`:
-     - Mock `ResizeObserver` (required by Radix UI dialogs):
-       ```ts
-       global.ResizeObserver = class {
-         observe() {}
-         unobserve() {}
-         disconnect() {}
-       };
-       ```
-     - Mock `window.matchMedia` and `Element.prototype.scrollIntoView`.
-
-2. **Test Suites (`apps/web/test/`):**
-   - `share.test.ts`:
-     - Extracts `url` when provided directly in query string;
-     - Extracts embedded `https://...` URL from `text` when mobile apps share `"Check this: https://example.com/post?id=1"` with no `url` param;
-     - Preserves `title` or falls back to remaining text;
-     - Handles empty or malformed share params gracefully.
-   - `stats.test.ts`:
-     - `zeroFillDailySeries` fills missing days with `0` in ascending UTC order;
-     - Handles month boundaries and single-day ranges;
-     - `formatUtcDay` formats dates strictly in UTC (e.g. `2026-10-25` evaluates to Oct 25 regardless of local timezone offset);
-     - `formatCountryName` maps `"XX"` to `"Unknown / Unspecified"` and ISO codes to readable names.
-   - `client.test.ts`:
-     - Attaches `Authorization: Bearer <token>` from `localStorage`;
-     - Sets `redirect: "manual"` on fetch calls;
-     - Throws `ApiClientError` on JSON `4xx`/`5xx` responses with parsed code/message;
-     - Throws `AccessSessionExpiredError` (and preserves `localStorage` token) on opaque redirects, CORS `TypeError`, or HTML responses on status < 500.
-   - `components.test.tsx`:
-     - `LinkFormModal` validates slugs (`api`, `app` rejected; `Docs` vs `docs` preserved; invalid characters rejected) and self-referencing target URLs;
-     - `LinkFormModal` in edit mode displays the mutable slug rename warning when `slug` is changed, and caching warnings for `301`/`308`;
-     - `LinkFormModal` correctly converts local `<input type="datetime-local">` values to UTC ISO-8601 strings;
-     - `LinkRow` displays primary buttons (Copy, Stats), renders mobile dropdown for secondary actions, and triggers the delete `AlertDialog`.
-
-3. **Full Monorepo Verification:**
-   - Run `pnpm build` (builds `@redirect/web` and `@redirect/api`).
-   - Run `node apps/api/scripts/verify-dist.mjs` (verifies distribution layout).
-   - Run `pnpm typecheck` across all workspace packages.
-   - Run `pnpm test` (runs both `@redirect/api` workerd tests and `@redirect/web` Vitest suites).
+**Gate:** links/stats/dispatch suites green; R10.2 query-count assertions pass.
 
 ---
 
-## 5. Frontend Definition of Done (Verified)
+### Phase R4 — Frontend Data Flow & Auth State (D19)
 
-From `/home/azraftaohid/codes/redirect/`:
+**R4.1 — No refetch on mutation (B9)**: `DashboardPage.tsx`, `LinkRow.tsx`
+- `handleLinkUpdated(saved)` → `setLinks(prev => prev.map(l => l.id === saved.id ? saved : l))`. No `fetchLinks()`.
+- `LinkRow` optimistic toggle: patch local state, call the API, then patch with the server record on success or restore on failure. Zero list refetches. (A row toggled out of the current status filter stays visible until the next natural refetch; acceptable.)
+- Create (quick shorten or modal): refetch the current page once (creation is rare, and ordering/pagination depend on the server).
+- Delete: remove locally and decrement `totalCount`; if the page becomes empty and `page > 1`, go to `page - 1` (which fetches).
 
-- [x] `pnpm build` succeeds and `node apps/api/scripts/verify-dist.mjs` passes, verifying:
-  - `apps/web/dist/app/index.html` exists and contains no inline `<script>`.
-  - `apps/web/dist/app/assets/*` exists.
-  - `apps/web/dist/app/manifest.webmanifest` exists and declares PNG and SVG icons.
-  - `apps/web/dist/app/sw.js` exists.
-  - `apps/web/dist/404.html` exists.
-  - No `apps/web/dist/index.html` or `apps/web/dist/assets/` exists at the root of `dist`.
-- [x] `pnpm typecheck` passes across `packages/shared`, `apps/web`, and `apps/api` with zero errors.
-- [x] `pnpm test` passes all backend workerd suites (`apps/api/test/*.test.ts`) and all frontend suites (`apps/web/test/*.test.ts`).
-- [x] `index.html` links `/app/manifest.webmanifest` with `crossorigin="use-credentials"`.
-- [x] Service worker is registered at `/app/sw.js` with `{ scope: "/app/" }`, precaches `/app/index.html` on install, and passes through opaque redirects and non-200 responses to avoid trapping expired Access sessions.
-- [x] Worker serves `/app/assets/*` with `Cache-Control: public, max-age=31536000, immutable`.
-- [x] All assets, styles, and QR generation work under the Worker's strict `Content-Security-Policy` without console CSP violations.
-- [x] Opening `/app/` while unauthenticated triggers a background `/api/v1/auth/verify` ping so `initial_token` is lazily created in KV on first visit.
-- [x] Links can be created, searched, filtered by tag/status, sorted, toggled active/inactive, edited (including renaming `slug` and clearing `expiresAt`), shared via QR code, and deleted.
-- [x] Link statistics zero-fill missing days, format dates strictly in UTC, and render `country` / `referrer` breakdowns only when enabled by the backend.
+**R4.2 — Single stats call**: `LinkStatsPage.tsx`, `api/client.ts`
+- Remove `getLink` from this page; `getLinkStats(id, days)` returns `link` too. A period change = one request. After editing via the modal, replace `stats.link` locally (no refetch).
+
+**R4.3 — Diff-based PATCH (B6, B7)**: `LinkFormModal.tsx`
+- On edit, build `UpdateLinkInput` containing only fields that differ from `initialLink`. Compare `expiresAt` via the local-input string (avoids false positives from seconds truncation); compare tags as sorted arrays. Send an empty `tags` array when all tags were removed. If nothing changed, close the modal with an info toast and make no request.
+- Client-side expiry check: "must be in the future" only when the expiry field changed.
+
+**R4.4 — Auth state owns the token (B13, B14)**: `context/AuthContext.tsx`, `api/client.ts`, `pages/SettingsPage.tsx`
+- `AuthContext` keeps `token` in state (initialized from storage); `login`, `logout` and `updateActiveToken` update both state and storage. Settings reads the token from context.
+- `request()` dispatches the `window` event `redirect:unauthorized` on any 401 for a request that used the **stored** token (not `verifyAuth(candidate)` during login). `AuthContext` handles it with the same grace logic as boot (F13): within 60 s → warning toast; otherwise clear the token → unlock screen with "Session expired or token revoked."
+
+**R4.5 — Settings page (B12)**
+- Initial-token row: a "Rotate" action (AlertDialog) instead of "Revoke". Custom rows: "Revoke".
+- Hide all rotate controls when the token list has no initial entry (`API_KEY` mode).
+- Reveal dialog copy: "Copy this token now. It is also visible as the value of `token:<id>` (or `initial_token`) in your Cloudflare KV dashboard."
+- Expiry input: `min` = now + 2 min (matches R1.3).
+- Current-session detection: `principal.kind === "token" && principal.id === t.id`, or `principal.kind === "initial" && t.isInitial`.
+
+**Gate:** `pnpm --filter @redirect/web typecheck && pnpm --filter @redirect/web test`.
+
+---
+
+### Phase R5 — Frontend Contract & UX Fixes
+
+- **R5.1 (B10)** `LinkFormModal`: `forwardQuery` defaults to `true` (initial state and create reset).
+- **R5.2 (B11)** `LinkFormModal`: validate with `validateSlug` and `validateTargetUrl(url, [window.location.hostname])` from `@redirect/shared`, showing the returned error text. Remove the local regex and the `setTargetUrl` side effect inside `validate()`.
+- **R5.3 (B11)** "Generate random" uses `generateValidRandomSlug(DEFAULT_SLUG_LENGTH)`. Slug input `maxLength={64}`. Slug-rename warning text: "Renaming frees `/<old>` immediately. The old link will return 404 (no alias is kept). Statistics are preserved."
+- **R5.4 (B17)** `LinkRow`: tags become `<button type="button">` with `stopPropagation`, calling a new `onTagClick(tag)` prop; `DashboardPage` sets the tag filter and resets `page` to 1.
+- **R5.5** Dashboard sort: add `updatedAt:desc` "Recently updated".
+- **R5.6** Quick shorten: after creation, attempt `navigator.clipboard.writeText(shortUrl)`; toast "Created /slug — copied" (or "Created /slug" if the write failed) with Sonner actions **Copy** and **QR** (QR opens `QrCodeModal` for the new link).
+- **R5.7 (B15)** Stats: label `"(direct)"` as "Direct / none"; `formatCountryName("XX")` → "Unknown" (no flag); render a dimension card whenever its key exists (empty → "No data in this period"); if no dimension keys exist, show the footer note about `ANALYTICS_DIMENSIONS`.
+- **R5.8** `zeroFillDailySeries(records, from, to)`: iterate UTC days from `range.from` to `range.to` inclusive. Remove the `days`/"today" logic.
+- **R5.9 (B16)** Share Target: run the duplicate check via `listLinks({ targetUrl, limit: 1 })` (R3.1); re-check on blur only if the URL changed since the last check; set "copied" only after a successful clipboard write.
+- **R5.10 (B21)** Search clear button: `aria-label="Clear search"`; update `dashboard-debounce.test.tsx` to query by that name.
+- **R5.11** Extract `normalizeUrlInput(raw): string` (trim; prepend `https://` if there is no `scheme://`) into `apps/web/src/utils/url.ts`; use it in quick shorten, the modal and the share page.
+
+**Gate:** web typecheck + tests green.
+
+---
+
+### Phase R6 — Analytics Accuracy (reduces D1 writes)
+
+`apps/api/src/utils/analytics.ts`
+- Do not count requests with an empty `User-Agent`.
+- Extend `BOT_UA_REGEX` with non-browser fetchers that inflate counts (each skipped request saves 2–4 D1 rows written):
+  - fediverse preview fetchers: `mastodon`, `pleroma`, `akkoma`, `misskey`, `friendica`, `http\.rb`
+  - HTTP clients: `curl`, `wget`, `python-requests`, `python-urllib`, `go-http-client`, `okhttp`, `axios`, `node-fetch`, `undici`, `libwww-perl`
+  - headless/audit tools: `headlesschrome`, `lighthouse`
+  - uptime monitors: `uptimerobot`, `pingdom`, `statuscake`
+  - others: `meta-externalagent`, `google-inspectiontool`, `googleother`, `iframely`
+- In-app browsers used by real people **must still count** (`FBAN`, `FBAV`, `Instagram`, `Line/`, `Twitter for iPhone`). Add tests for both lists.
+
+**Gate:** analytics suite green, including the budget assertions (2/3/4 rows).
+
+---
+
+### Phase R7 — Hardening, Assets & Service Worker
+
+- **R7.1 (D17)** `apps/api/src/routes/app.ts`: update the `APP_SECURITY_HEADERS` CSP and add `X-Robots-Tag: noindex, nofollow` to app responses. Add a Hono middleware on `apiApp` that sets `X-Robots-Tag: noindex, nofollow` and `X-Content-Type-Options: nosniff` on every API response.
+- **R7.2** `apps/web/404.html`: remove the "Go to Dashboard" link. Public visitors of a dead short link gain nothing from it, and it advertises the admin path. Keep the page self-contained.
+- **R7.3 (B19, D18)** `apps/web/public/sw.js` + `vite.config.ts`:
+  - `sw.js` declares `const CACHE_NAME = "redirect-app-__BUILD_ID__";`.
+  - A Vite `closeBundle` plugin replaces `__BUILD_ID__` in `dist/app/sw.js` with a short hash of the built `index.html`.
+  - Cache navigation responses only when `content-type` includes `text/html`.
+  - `verify-dist.mjs` fails if `__BUILD_ID__` is still present in `dist/app/sw.js`.
+- **R7.4** `verify-dist.mjs`: also assert `icon-192.png`, `icon-512.png` and `apple-touch-icon.png` exist under `dist/app/`.
+- **R7.5 (B20)** Add the dev dependency `tw-animate-css` and `@import "tw-animate-css";` in `globals.css` (CSS only, no runtime JS). If the owner prefers no new dependency, remove the animation utility classes instead.
+
+**Gate:** `pnpm build && node apps/api/scripts/verify-dist.mjs`; dispatch tests assert the new headers.
+
+---
+
+### Phase R8 — Code Cleanup
+
+- Delete `apps/api/src/utils/slug.ts`; import generators from `@redirect/shared`.
+- Delete the unused `isLinkScheduled` (`apps/web/src/utils/dates.ts`) and any other dead code found by enabling `noUnusedLocals` and `noUnusedParameters` in `tsconfig.base.json`.
+- Zod v4: replace deprecated `z.string().datetime()` with `z.iso.datetime()` and `z.ZodIssueCode.custom` with `"custom"`.
+- Schemas: normalize an empty `title` (`""` after trim) to `null`; build one `statusCodeSchema` from `REDIRECT_STATUS_CODES`; derive `updateLinkSchema` from a shared base object (no duplicated field definitions).
+- Remove the redundant `scrollTo` in `LinkStatsPage` (Layout already does it).
+- Remove `@testing-library/user-event` if it is still unused after R10, or use it in the new tests.
+
+**Gate:** `pnpm typecheck && pnpm test`.
+
+---
+
+### Phase R9 — Bundle Size (no behavior change)
+
+- Use `React.lazy` + `Suspense` for `LinkStatsPage`, `SettingsPage`, `ShareTargetPage` and `QrCodeModal` (so `qrcode` loads only when the modal opens). The dashboard and auth gate stay in the entry chunk.
+- Record the entry-chunk gzip size before/after in the commit message.
+
+**Gate:** `pnpm build`, `verify-dist` and web tests green; manual smoke test of each lazy route under `wrangler dev`.
+
+---
+
+### Phase R10 — Tests
+
+**R10.1 API — auth/tokens (`auth.test.ts`)**
+- `API_KEY` values containing `+/=`, spaces, or only 8 chars authenticate as `env`; tokens still work alongside.
+- The initial token matches `rdir_initial_[A-Za-z0-9]{32}`; a malformed `initial_token` value is regenerated on the next unauthenticated request.
+- Create → key `token:<id>` exists with value = token and metadata `{ name, createdAt, expiresAt, preview }`; auth succeeds; revoke deletes exactly that key; a wrong secret with a valid id fails.
+- Token expiry: < 2 min → 400 `invalid_expiry`; past → 400; valid → KV `expiration` set.
+- Rotate invalidates the old initial token; deleting `initial_token` regenerates a different one.
+
+**R10.2 API — links/stats (`links.test.ts`, `analytics.test.ts`)**
+- Custom slug conflict → 409 without throwing; auto slug retries (simulate by pre-inserting the generator's output via a mocked `generateValidRandomSlug`).
+- PATCH: a single statement (spy on `env.DB.prepare`: exactly one call); unknown id → 404; slug conflict → 409; editing an expired link's title without `expiresAt` → 200; clearing tags with `[]` → 200.
+- DELETE of an unknown id → 404 with one `prepare` call.
+- `listLinks` uses one `batch` call; the `targetUrl` exact filter works.
+- Stats returns `link` and only the enabled dimension keys; unknown id → 404; one `batch` call.
+- Malformed JSON → 400 `bad_request`.
+- Bot/in-app-browser counting lists from R6.
+
+**R10.3 API — dispatch (`dispatch.test.ts`)**
+- `/app/` and `/app/links/x` with `If-None-Match: <etag>` → 304 with security headers; without it → 200 with a non-empty body.
+- `/APP` → 404 with zero `prepare` calls.
+- CSP and `X-Robots-Tag` values.
+
+**R10.4 Web**
+- `LinkFormModal`: rejects `api`/`App`, self-host targets and 65-char slugs; `forwardQuery` defaults on; edit sends only changed fields; removing all tags sends `[]`; an unchanged form sends nothing.
+- `LinkRow`: a tag click calls `onTagClick` and does not navigate.
+- `DashboardPage`: toggling a row triggers zero additional `listLinks` calls.
+- `stats.test.ts`: `zeroFillDailySeries(records, from, to)` across month/year boundaries; `formatCountryName("XX")`.
+- `client.test.ts`: a 401 with the stored token dispatches `redirect:unauthorized`; a 401 for a login candidate does not.
+- `qr.test.ts`: the `generateQrPngBlob` path never calls `fetch` (mock the canvas).
+
+**Gate:** `pnpm typecheck && pnpm test && pnpm build && node apps/api/scripts/verify-dist.mjs` all green.
+
+---
+
+### Phase R11 — Documentation & Concept Amendments
+
+Apply these edits. They are justified changes, not drift.
+
+**`Concept.md`**
+- §4 Authentication: tokens use the format `rdir_<id>_<secret>`; custom tokens are stored under `token:<id>` with the full token as the value; the initial token stays under `initial_token`. Each auth/revoke/rotate is one KV operation.
+- §4: `API_KEY` may be any non-empty string; it is checked before token-format rules so it can never lock the owner out.
+- §1.5 / Structure: the static 404 page contains no link to the dashboard.
+- §2: the bot heuristic also excludes fediverse preview fetchers, HTTP client libraries and uptime monitors; requests without a User-Agent are not counted.
+- §3: the stats endpoint returns the link record together with the series (one request per stats view).
+- §6: the SW cache is versioned per build; the CSP includes `object-src 'none'; base-uri 'none'; form-action 'self'`; admin and API responses carry `X-Robots-Tag: noindex`.
+
+**`README.md`**
+- Toolchain: Node 20+, pnpm version from `packageManager`.
+- Token format and KV layout (D13); "find your token" = the value of `initial_token` or `token:<id>`.
+- `API_KEY` can be any string; recommend `openssl rand -base64 32`.
+- Remove the "32-character Base62" claim.
+
+**`plan.md`**: mark Part III phases complete with commit hashes.
+
+**Gate:** docs reviewed against code; no stale names (`token:<rawToken>`, `generateTokenId`, `TOKEN_REGEX`) remain anywhere (`grep`).
+
+---
+
+### Phase R12 — Optional Tooling (only if the owner agrees)
+
+- `.github/workflows/ci.yml`: on push/PR run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `verify-dist`. Free for this workload; does not touch deployment.
+- Linting/formatting: a single tool (Biome) with a minimal config and `pnpm lint` / `pnpm format` scripts.
+
+---
+
+## 6. Considered and Deferred / Rejected Alternatives
+
+| Alternative | Decision | Reasoning |
+| :-- | :-- | :-- |
+| D1 read replication (`withSession`) for redirects | Deferred | Free and faster, but conflicts with D5 / Concept principle 4 ("simple over fast"), needs a dashboard toggle (friction, D20), and replica lag would serve old targets right after an edit (the concept values D1's immediate consistency). Revisit only with measured latency complaints. |
+| KV or Cache API mirror of slug → target | Rejected | Violates D5; adds a second source of truth and KV writes on every edit. |
+| Smart Placement | Rejected | Redirects run one query; no measurable benefit, adds a variable. |
+| In-isolate memo of authenticated principals | Rejected | KV `get` is already edge-cached (~60 s); a memo adds revocation ambiguity for negligible gain. |
+| Drop the `links` counter-row update (derive totals from `SUM(link_daily_clicks)`) | Deferred — owner decision | Halves D1 writes per click (2 → 1; the main cost driver). Costs: `lastClickedAt` becomes day-granular, and sorting the list by clicks needs an aggregate over all rollups (reads ≈ links × days; cheap on paid, could matter on the 5M/day free read quota with thousands of links). Decide before release; adopting it changes the Concept §2 cost table. |
+| Keyset pagination / dropping `COUNT(*)` | Deferred | Only saves rows read on very large tables; the UI uses page counts. Not needed at single-user scale. |
+| `COUNT(*) OVER()` in one statement | Rejected | Loses the total on an out-of-range page; `batch` is equally cheap and simpler. |
+| Auto-run remote migrations in `pnpm deploy` | Deferred | Convenient, but `wrangler d1 migrations apply --remote` prompts interactively, which would make deploy behavior surprising. Document instead. |
+| `observability.head_sampling_rate` | Not needed | Workers Logs volume stays within included limits at single-user scale. |
+| Routing `/API/...` / `/APP` case-insensitively into the app | Rejected | See §3 O3.2; R3.6 removes the only real cost. |
+
+---
+
+## 7. Definition of Done (Part III)
+
+- [ ] B1–B22 fixed, each covered by a test or an explicit verification note.
+- [ ] Auth = 1 KV read for every principal kind; token create/rotate = 1 write; revoke = 1 delete; list = 1 list (+1 read for the initial entry).
+- [ ] `POST /links` = 1 D1 statement in the common case; `PATCH` = 1; `DELETE` = 1; `GET /links` = 1 batch; `GET /links/:id/stats` = 1 batch; reserved-segment requests = 0.
+- [ ] Dashboard toggle/edit cause zero list refetches; the stats view = 1 request per period change.
+- [ ] Any non-empty `API_KEY` authenticates; no format rule can lock the owner out.
+- [ ] SPA reloads never render blank (304 handling); QR PNG works under the production CSP.
+- [ ] No new bindings, services, paid features or manual dashboard steps; D1 rows written per click unchanged or lower.
+- [ ] `pnpm typecheck`, `pnpm test`, `pnpm build`, `verify-dist` green; Concept.md and README updated per R11.
+
+---
+
+## 8. Part IV — Future Feature Backlog (assess after Part III; do not implement)
+
+Scoring: **Cost** = effect on D1 rows written per click / KV writes; **Friction** = deploy or ops burden; **Concept** = conflicts to resolve first.
+
+### Tier A — high value, ~zero cost, no concept conflict
+
+| Feature | Value | Cost | Friction | Notes |
+| :-- | :-- | :-- | :-- | :-- |
+| Bookmarklet / "Shorten this page" | One-click shortening on desktop | 0 | 0 | A `javascript:` link opening `/app/share?url=…`; reuses the Share Target page. Document in Settings. |
+| iOS Shortcut template + docs | Native share sheet on iOS | 0 | 0 | Downloadable instructions using `POST /api/v1/links` with a dedicated token. |
+| Scheduled activation (`starts_at`) | Pre-publish links | 0 per click (same row read) | Migration | Mirror of `expires_at`; before the start time the link behaves like a disabled one. |
+| Per-link fallback URL for expired/disabled | Better UX than a global fallback | 0 | Migration | Column `fallback_url`, validated like targets. |
+| Tag suggestions endpoint | Faster tagging | Reads only | 0 | `SELECT DISTINCT value FROM links, json_each(tags)`. |
+| UTM builder in the link form | Common marketing need | 0 | 0 | Pure client-side; writes into `targetUrl`. |
+| Duplicate-link action | Convenience | 1 write per use | 0 | The client calls create with copied fields. |
+| Client-side CSV/JSON export | Portability without an endpoint | Reads only | 0 | Pages through `GET /links`. The concept currently says "use `wrangler d1 export`"; amend if adopted. |
+
+### Tier B — valuable, small cost or open design questions
+
+| Feature | Value | Cost | Friction | Concept |
+| :-- | :-- | :-- | :-- | :-- |
+| Read-only / scoped tokens | Safer integrations (e.g. stats dashboards) | 0 (metadata field) | 0 | Extends D13 metadata with `scopes`. |
+| Max-clicks expiry | One-time/limited links | 0 extra (the counter is already read) | Migration | Interacts with bot filtering and permanent-redirect caching; must use temporary codes. |
+| Device/OS targeting (App Store vs Play Store) | App marketing | 0 (UA read, never stored) | Migration | Tension with "simple"; D6 still holds since the UA isn't stored. |
+| Geo targeting via `cf.country` | Regional targets | 0 | Migration | Same as above. |
+| Slug history / aliases after rename | No broken old links | +1 read on misses only | Migration | A concept non-goal today; worth reconsidering since renames are a headline feature. |
+| Archive (soft delete) | Keep stats, hide the link | 0 | Migration | Alternative to destructive delete (cascading deletes cost writes). |
+| Link notes field | Context for the owner | 0 | Migration | Trivial. |
+| Custom Open Graph preview (serve OG HTML to known preview bots) | Branded social previews | 0 | Migration | Bots are already detected, but serving HTML instead of a redirect changes semantics; needs concept wording. |
+| OpenAPI document for `/api/v1` | CLI/integration friendliness | 0 | 0 | Generate from the shared Zod schemas. |
+
+### Tier C — defer or reject unless requirements change
+
+| Feature | Why not now |
+| :-- | :-- |
+| Target health checks (cron fetch of targets) | Server-side fetching activates the SSRF concerns D9 explicitly defers; uses subrequests/cron. |
+| Hourly analytics, unique visitors, per-click logs | Multiply D1 writes or require per-visitor state; violate D6 / the cost principle. |
+| Email/webhook notifications | Needs an external service (friction, possibly cost). |
+| Password-protected links | Requires an interstitial page, secret storage and brute-force handling; complexity disproportionate for a personal shortener. |
+| Multi-domain / multi-user | Concept non-goals; would reshape schema and auth. |
+| A/B target rotation | Little value without per-variant analytics (more writes). |
