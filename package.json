@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Simple, lightweight URL redirection platform on Cloudflare Workers & D1",
-  "packageManager": "pnpm@11.2.2",
+  "packageManager": "pnpm@12.16.1",
   "scripts": {
     "dev": "pnpm --parallel --filter @redirect/api --filter @redirect/web dev",
     "build": "pnpm --filter @redirect/web build && pnpm --filter @redirect/api build",
