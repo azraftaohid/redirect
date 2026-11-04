@@ -164,7 +164,203 @@ apps/web/test/         setup · share · stats · client · components · link-r
 
 ---
 
-## 4. Part IV — Future Feature Backlog (Backlog for subsequent phases)
+## 5. Part V — Implementation Plan: Post-Release Hardening & Flaw Remediations (Phases H1–H4)
+
+Specification for an LLM coding agent addressing the defects identified during the codebase audit (B23–B31).
+Work through the phases **in order** (H1 → H4). Each phase lists target files, exact behavior, and a verification gate. Do not start the next phase until the gate passes.
+
+---
+
+### Phase H1 — P1 App Functionality & Redirect Loop Prevention — ✅ Completed
+
+**H1.1 — Advanced Modal Creation State Sync (B23)**
+- **Files:** `apps/web/src/pages/DashboardPage.tsx`
+- **Context:** Opening `LinkFormModal` from the "Advanced" button creates links with `initialLink = null`. On success, `LinkFormModal` invokes `onSuccess(result)`. Currently, `DashboardPage` passes `handleLinkUpdated` (`setLinks(prev => prev.map(l => l.id === saved.id ? saved : l))`). Because `saved.id` is new, `prev.map` returns the existing array unchanged. `fetchLinks()` is never called and `totalCount` is not incremented, so the newly created link is completely missing from the dashboard until manual page reload.
+- **Specification:**
+  1. In `DashboardPage.tsx`, define a unified handler:
+     ```tsx
+     function handleLinkSaved(saved: LinkRecord) {
+       if (editingLink) {
+         setLinks((prev) => prev.map((l) => (l.id === saved.id ? saved : l)));
+       } else {
+         if (page !== 1) {
+           setPage(1);
+         } else {
+           fetchLinks();
+         }
+       }
+     }
+     ```
+  2. Pass `onSuccess={handleLinkSaved}` to `<LinkFormModal>`.
+  3. Keep `handleLinkUpdated` for `LinkRow`'s `onUpdate` prop (inline switch toggles and inline optimistic updates must not refetch).
+- **Verification:** When creating a link via the modal, `fetchLinks()` is invoked; when editing an existing link, local state is patched without refetching.
+
+**H1.2 — FQDN Trailing Dot Loophole in Target URL Validation (B24)**
+- **Files:** `packages/shared/src/validation.ts`, `apps/api/test/validation.test.ts`, `apps/api/test/redirect.test.ts`
+- **Context:** WHATWG URL standard preserves trailing dots in root-anchored FQDNs (e.g. `https://redirect.example.com./my-slug` has `hostname = "redirect.example.com."`). In `validateTargetUrl`, `lowerOwnHosts.includes(lowerTargetHost)` evaluates `"redirect.example.com." === "redirect.example.com"` as `false`. This bypasses self-referential loop checks, creating infinite HTTP redirect loops in clients or workers.
+- **Specification:**
+  1. In `packages/shared/src/validation.ts` (`validateTargetUrl`):
+     - Strip trailing dots from both `lowerTargetHost` and `lowerOwnHosts`:
+       ```ts
+       const lowerTargetHost = parsed.hostname.toLowerCase().replace(/\.+$/, "");
+       const lowerOwnHosts = ownHostnames.map((h) => h.toLowerCase().replace(/\.+$/, ""));
+       ```
+  2. In `packages/shared/src/validation.ts` (`parseOwnHostnames`):
+     - Strip trailing dots from `requestHostname` and items from `ownHostnamesVar`:
+       ```ts
+       const trimmedRequestHost = requestHostname.trim().toLowerCase().replace(/\.+$/, "");
+       ```
+       and
+       ```ts
+       const trimmed = part.trim().toLowerCase().replace(/\.+$/, "");
+       ```
+  3. Tests:
+     - In `apps/api/test/validation.test.ts`, add test cases asserting `validateTargetUrl("https://redirect.example.com./sub", ["redirect.example.com"])` returns `{ ok: false }`.
+     - In `apps/api/test/redirect.test.ts`, add a test case asserting that `FALLBACK_URL: "https://redirect.example.com./loop"` returns 404 rather than 307.
+
+**Gate:** `pnpm --filter @redirect/shared test && pnpm --filter @redirect/api test && pnpm --filter @redirect/web test` pass.
+
+---
+
+### Phase H2 — Billing, Quota & Cardinality Protection
+
+**H2.1 — Unbounded Referrer Cardinality Mitigation in D1 (B25)**
+- **Files:** `apps/api/src/utils/analytics.ts`, `apps/api/test/analytics.test.ts`
+- **Context:** In `recordClick`, when `dim === "referrer"`, the code extracts `parsed.hostname.toLowerCase().slice(0, 64)` from the `Referer` header and inserts into `link_daily_dims (link_id, day, dim, value)`. An attacker sending requests with randomized subdomains (`https://<uuid>.attacker.com/`) writes arbitrary rows into D1. `getLinkStats` then aggregates all rows with `GROUP BY value ORDER BY clicks DESC`, freezing with CPU timeouts and blowing D1 row read/write billing.
+- **Specification:**
+  1. In `apps/api/src/utils/analytics.ts`, add a helper function:
+     ```ts
+     export function normalizeReferrer(refererHeader?: string | null): string {
+       if (!refererHeader) return "(direct)";
+       try {
+         const parsed = new URL(refererHeader);
+         if (!parsed.hostname || !/^[a-z0-9.-]+$/i.test(parsed.hostname)) {
+           return "(direct)";
+         }
+         let host = parsed.hostname.toLowerCase().replace(/\.+$/, "");
+         // If IPv4 or simple localhost, return as-is
+         if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === "localhost") {
+           return host.slice(0, 64);
+         }
+         // Collapse arbitrary subdomains to base registrable domain (e.g. uuid.twitter.com -> twitter.com)
+         const parts = host.split(".");
+         if (parts.length > 2) {
+           const twoPartTlds = ["co.uk", "com.au", "co.jp", "org.uk", "gov.uk", "edu.au", "ac.uk", "net.au"];
+           const lastTwo = parts.slice(-2).join(".");
+           if (twoPartTlds.includes(lastTwo) && parts.length > 3) {
+             host = parts.slice(-3).join(".");
+           } else if (!twoPartTlds.includes(lastTwo)) {
+             host = parts.slice(-2).join(".");
+           }
+         }
+         return host.slice(0, 64);
+       } catch {
+         return "(direct)";
+       }
+     }
+     ```
+  2. Use `normalizeReferrer(refererHeader)` in `recordClick` for the `referrer` dimension statement.
+  3. Tests: In `apps/api/test/analytics.test.ts`, verify that `https://random123.sub.twitter.com/path` records referrer as `twitter.com`.
+
+**H2.2 — KV 401 Write Storm & Race Condition Protection (B26)**
+- **Files:** `apps/api/src/auth/middleware.ts`, `apps/api/test/auth.test.ts`
+- **Context:** In `authMiddleware`, calling `ensureInitialToken(c.env)` on *every* unauthenticated request to *any* endpoint creates a severe KV write vector on new deployments or after token recovery. Because KV takes up to 60s to propagate worldwide, concurrent 401s across global edge nodes read `null` and fire parallel `AUTH_TOKENS.put(...)`, quickly exhausting Cloudflare's 1,000 writes/day quota and causing secret churn.
+- **Specification:**
+  1. In `apps/api/src/auth/middleware.ts`:
+     - Restrict the lazy bootstrap trigger: call `await ensureInitialToken(c.env)` only when:
+       `c.req.path === "/api/v1/auth/verify" && !extractToken(c.req.raw)`
+       (i.e., only on unauthenticated verify requests, which is the intentional bootstrap ping sent by the web app on launch per Decision F6).
+     - Any other request with an invalid, expired, or missing token (e.g. `/api/v1/links`, `/api/v1/tokens`) must return 401 immediately without invoking `ensureInitialToken`.
+  2. In `ensureInitialToken`:
+     - Keep the atomic check `const existing = await env.AUTH_TOKENS.get("initial_token"); if (existing && parseToken(existing)?.id === INITIAL_TOKEN_ID) return existing;`.
+- **Verification Gate:**
+  - In `apps/api/test/auth.test.ts`: verify that unauthenticated `GET /api/v1/links` returns 401 without writing `initial_token` to KV.
+  - Verify that unauthenticated `GET /api/v1/auth/verify` continues to bootstrap `initial_token`.
+
+**H2.3 — Deduplicate `ANALYTICS_DIMENSIONS` (B28)**
+- **Files:** `apps/api/src/utils/analytics.ts`, `apps/api/test/analytics.test.ts`
+- **Context:** If `ANALYTICS_DIMENSIONS="country,country"` is set, `parseEnabledDimensions` does not deduplicate the array, adding duplicate queries to `db.batch()` during `getLinkStats` and `recordClick`.
+- **Specification:**
+  1. In `apps/api/src/utils/analytics.ts` (`parseEnabledDimensions`):
+     ```ts
+     export function parseEnabledDimensions(raw?: string): AnalyticsDimension[] {
+       if (!raw) return [];
+       const validDims: AnalyticsDimension[] = ["country", "referrer"];
+       const unique = Array.from(new Set(raw.split(",").map((d) => d.trim().toLowerCase())));
+       return unique.filter((d): d is AnalyticsDimension => validDims.includes(d as AnalyticsDimension));
+     }
+     ```
+  2. Tests: In `apps/api/test/analytics.test.ts`, assert `parseEnabledDimensions("country,country,referrer")` returns `["country", "referrer"]`.
+
+**Gate:** `pnpm --filter @redirect/api test` green.
+
+---
+
+### Phase H3 — UI Robustness & UX Hardening
+
+**H3.1 — Dashboard Sanitization of `?page=` Query Parameter (B27)**
+- **Files:** `apps/web/src/pages/DashboardPage.tsx`, `apps/web/test/dashboard-debounce.test.tsx`
+- **Context:** `initialPage` is parsed with `Number(searchParams.get("page") || 1)`. Non-numeric or non-positive values (e.g. `?page=0`, `?page=-1`, `?page=abc`) produce negative or `NaN` offsets, causing `listLinksQuerySchema` to fail with `400 validation_error`, breaking the dashboard page.
+- **Specification:**
+  1. In `DashboardPage.tsx`:
+     ```ts
+     const rawPage = searchParams.get("page");
+     const parsedPage = rawPage ? parseInt(rawPage, 10) : 1;
+     const initialPage = Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
+     ```
+  2. Ensure `setPage` calls clamp to `>= 1`.
+  3. Tests: In `apps/web/test/dashboard-debounce.test.tsx`, add test asserting `DashboardPage` safely defaults to page 1 and queries `offset: 0` when `window.location.search` is `?page=0` or `?page=invalid`.
+
+**H3.2 — Expired Link Active Switch Guard (B29)**
+- **Files:** `apps/web/src/components/LinkRow.tsx`, `apps/web/test/link-row.test.tsx`
+- **Context:** `LinkRow` allows toggling the "Active" switch on expired links. While `updateLink` succeeds in D1, the redirection engine checks `expires_at <= now` and continues returning 404/fallback, misleading the user.
+- **Specification:**
+  1. In `LinkRow.tsx`:
+     - If `expired` is true:
+       - Disable the `Switch`: `disabled={isUpdatingActive || expired}`.
+       - Provide a `title="Cannot activate an expired link. Edit the link to extend or clear expiration."` on the switch container.
+  2. Tests: In `apps/web/test/link-row.test.tsx`, verify the switch has `disabled` attribute when `link.expiresAt` is expired.
+
+**H3.3 — ShareTarget Navigation Fallback (B30)**
+- **Files:** `apps/web/src/pages/ShareTargetPage.tsx`, `apps/web/test/share.test.ts`
+- **Context:** When a link is created from `ShareTargetPage`, if `navigator.share` is supported, the "View Analytics" link button is hidden in favor of "Share", leaving mobile users with no direct way to view the link's analytics or details.
+- **Specification:**
+  1. In `ShareTargetPage.tsx`:
+     - Always display a button linking to the link's stats page: `<Link href={`/links/${createdLink.id}`}><Button variant="outline" className="w-full gap-2 h-10 text-sm"><span>View Analytics</span></Button></Link>`.
+     - When `navigator.share` is present, display both "Share" and "View Analytics".
+
+**H3.4 — Custom Token List Safety Limit (B31)**
+- **Files:** `apps/api/src/routes/tokens.ts`
+- **Specification:**
+  1. In `GET /tokens`, add a maximum loop iteration guard:
+     ```ts
+     let pageCount = 0;
+     const MAX_KV_LIST_PAGES = 5; // Caps at 5 pages (up to 250-500 keys)
+     do {
+       pageCount++;
+       ...
+       if (listRes.list_complete || pageCount >= MAX_KV_LIST_PAGES) {
+         break;
+       }
+       cursor = listRes.cursor;
+     } while (cursor);
+     ```
+
+**Gate:** `pnpm --filter @redirect/web test` and `pnpm --filter @redirect/api test` green.
+
+---
+
+### Phase H4 — Final Verification & Release Check
+
+- [ ] All workspace packages pass strict typechecking: `pnpm typecheck`.
+- [ ] Complete test suite passes: `pnpm test` (assert all tests green).
+- [ ] Production build succeeds: `pnpm build`.
+- [ ] Distribution verification passes: `node apps/api/scripts/verify-dist.mjs`.
+- [ ] No regression in bundle size or code-split chunks.
+
+---
+
+## 6. Part IV — Future Feature Backlog (Backlog for subsequent phases)
 
 Scoring: **Cost** = effect on D1 rows written per click / KV writes; **Friction** = deploy or ops burden; **Concept** = conflicts to resolve first.
 

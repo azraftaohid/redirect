@@ -206,6 +206,18 @@ export function DashboardPage(): React.ReactElement {
     setLinks((prev) => prev.map((l) => (l.id === saved.id ? saved : l)));
   }
 
+  function handleLinkSaved(saved: LinkRecord) {
+    if (editingLink) {
+      setLinks((prev) => prev.map((l) => (l.id === saved.id ? saved : l)));
+    } else {
+      if (page !== 1) {
+        setPage(1);
+      } else {
+        fetchLinks();
+      }
+    }
+  }
+
   function handleLinkDeleted(id: string) {
     setLinks((prev) => {
       const next = prev.filter((l) => l.id !== id);
@@ -440,7 +452,7 @@ export function DashboardPage(): React.ReactElement {
       <LinkFormModal
         isOpen={formModalOpen}
         onClose={() => setFormModalOpen(false)}
-        onSuccess={handleLinkUpdated}
+        onSuccess={handleLinkSaved}
         initialLink={editingLink}
       />
 

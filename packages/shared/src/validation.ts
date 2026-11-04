@@ -25,7 +25,7 @@ export function parseOwnHostnames(
 ): string[] {
   const result = new Set<string>();
 
-  const trimmedRequestHost = requestHostname.trim().toLowerCase();
+  const trimmedRequestHost = requestHostname.trim().toLowerCase().replace(/\.+$/, "");
   if (trimmedRequestHost) {
     result.add(trimmedRequestHost);
   }
@@ -33,7 +33,7 @@ export function parseOwnHostnames(
   if (ownHostnamesVar) {
     const parts = ownHostnamesVar.split(",");
     for (const part of parts) {
-      const trimmed = part.trim().toLowerCase();
+      const trimmed = part.trim().toLowerCase().replace(/\.+$/, "");
       if (trimmed) {
         result.add(trimmed);
       }
@@ -76,8 +76,8 @@ export function validateTargetUrl(
     };
   }
 
-  const lowerTargetHost = parsed.hostname.toLowerCase();
-  const lowerOwnHosts = ownHostnames.map((h) => h.toLowerCase());
+  const lowerTargetHost = parsed.hostname.toLowerCase().replace(/\.+$/, "");
+  const lowerOwnHosts = ownHostnames.map((h) => h.toLowerCase().replace(/\.+$/, ""));
 
   if (lowerOwnHosts.includes(lowerTargetHost)) {
     return {

@@ -238,6 +238,13 @@ describe("Redirect Engine (/:slug)", () => {
       { FALLBACK_URL: "https://redirect.example.com/loop-target" }
     );
     expect(res.status).toBe(404);
+
+    const resTrailingDot = await fetchWorker(
+      "https://redirect.example.com/unknown-slug",
+      { redirect: "manual" },
+      { FALLBACK_URL: "https://redirect.example.com./loop" }
+    );
+    expect(resTrailingDot.status).toBe(404);
   });
 
   it("returns 405 Method Not Allowed with Allow header for non-GET/HEAD methods on slugs", async () => {

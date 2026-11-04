@@ -60,6 +60,8 @@ describe("Hostname and Target URL validation", () => {
     expect(validateTargetUrl("https://redirect.example.com/other", ownHosts).ok).toBe(false);
     expect(validateTargetUrl("https://REDIRECT.EXAMPLE.COM/other", ownHosts).ok).toBe(false);
     expect(validateTargetUrl("https://go.example.com/sub", ownHosts).ok).toBe(false);
+    expect(validateTargetUrl("https://redirect.example.com./sub", ["redirect.example.com"]).ok).toBe(false);
+    expect(validateTargetUrl("https://redirect.example.com/sub", ["redirect.example.com."]).ok).toBe(false);
   });
 
   it("rejects target URLs exceeding max length", () => {
