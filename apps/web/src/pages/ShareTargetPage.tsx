@@ -192,7 +192,7 @@ export function ShareTargetPage(): React.ReactElement {
                   <span>{copied ? "Copied" : "Copy Link"}</span>
                 </Button>
 
-                {typeof navigator !== "undefined" && "share" in navigator ? (
+                {typeof navigator !== "undefined" && "share" in navigator && (
                   <Button
                     variant="outline"
                     onClick={handleNativeShare}
@@ -201,13 +201,13 @@ export function ShareTargetPage(): React.ReactElement {
                     <Share2 className="w-4 h-4" />
                     <span>Share</span>
                   </Button>
-                ) : (
-                  <Link href={`/links/${createdLink.id}`}>
-                    <Button variant="outline" className="w-full gap-2 h-10 text-sm">
-                      <span>View Analytics</span>
-                    </Button>
-                  </Link>
                 )}
+
+                <Link href={`/links/${createdLink.id}`}>
+                  <Button variant="outline" className="w-full gap-2 h-10 text-sm">
+                    <span>View Analytics</span>
+                  </Button>
+                </Link>
               </div>
 
               <div className="text-center pt-2">

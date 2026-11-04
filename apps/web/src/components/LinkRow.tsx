@@ -75,7 +75,7 @@ export function LinkRow({
   }
 
   async function handleToggleActive(checked: boolean) {
-    if (isUpdatingActive) return;
+    if (isUpdatingActive || expired) return;
 
     // Optimistic update
     const previous = link.isActive;
@@ -223,11 +223,14 @@ export function LinkRow({
           {/* Right Column: Active Switch, Stats Pill & Dropdown */}
           <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-100 dark:border-zinc-800">
             {/* Active Toggle */}
-            <div className="flex items-center gap-2">
+            <div
+              className="flex items-center gap-2"
+              title={expired ? "Cannot activate an expired link. Edit the link to extend or clear expiration." : undefined}
+            >
               <Switch
                 checked={link.isActive}
                 onCheckedChange={handleToggleActive}
-                disabled={isUpdatingActive}
+                disabled={isUpdatingActive || expired}
                 aria-label={`Toggle active status for /${link.slug}`}
               />
             </div>

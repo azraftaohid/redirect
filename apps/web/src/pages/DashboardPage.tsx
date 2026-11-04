@@ -35,7 +35,9 @@ export function DashboardPage(): React.ReactElement {
   const initialStatus = searchParams.get("status") || "all";
   const initialSortBy = (searchParams.get("sortBy") as ListLinksQuery["sortBy"]) || "createdAt";
   const initialSortOrder = (searchParams.get("sortOrder") as ListLinksQuery["sortOrder"]) || "desc";
-  const initialPage = Number(searchParams.get("page") || 1);
+  const rawPage = searchParams.get("page");
+  const parsedPage = rawPage ? parseInt(rawPage, 10) : 1;
+  const initialPage = Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
 
   const [search, setSearch] = useState(initialSearch);
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
@@ -222,7 +224,7 @@ export function DashboardPage(): React.ReactElement {
     setLinks((prev) => {
       const next = prev.filter((l) => l.id !== id);
       if (next.length === 0 && page > 1) {
-        setPage((p) => p - 1);
+        setPage((p) => Math.max(1, p - 1));
       }
       return next;
     });
@@ -439,7 +441,7 @@ export function DashboardPage(): React.ReactElement {
               variant="outline"
               size="sm"
               disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setPage((p) => Math.min(totalPages, Math.max(1, p + 1)))}
               className="h-8 w-8 p-0"
             >
               <ChevronRight className="w-4 h-4" />

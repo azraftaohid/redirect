@@ -42,8 +42,11 @@ tokensRouter.get("/tokens", async (c) => {
   // List all "token:*" keys with metadata (no value reads)
   let cursor: string | undefined = undefined;
   const customTokens: TokenInfo[] = [];
+  let pageCount = 0;
+  const MAX_KV_LIST_PAGES = 5; // Caps at 5 pages (up to 250-500 keys)
 
   do {
+    pageCount++;
     const listRes: KVNamespaceListResult<StoredTokenMetadata> =
       await c.env.AUTH_TOKENS.list<StoredTokenMetadata>({
         prefix: "token:",
@@ -62,7 +65,7 @@ tokensRouter.get("/tokens", async (c) => {
       });
     }
 
-    if (listRes.list_complete) {
+    if (listRes.list_complete || pageCount >= MAX_KV_LIST_PAGES) {
       break;
     }
     cursor = listRes.cursor;

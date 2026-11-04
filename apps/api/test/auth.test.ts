@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env, SELF } from "cloudflare:test";
 import { TOKEN_FORMAT } from "../src/auth/tokens.js";
 
@@ -172,6 +172,27 @@ describe("Authentication & Token Management", () => {
       headers: { Authorization: `Bearer ${createdToken.token}` },
     });
     expect(verifyRevoked.status).toBe(401);
+  });
+
+  it("caps GET /tokens traversal at MAX_KV_LIST_PAGES to prevent unbounded loops (H3.4/B31)", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
+
+    let listCalls = 0;
+    vi.spyOn(env.AUTH_TOKENS, "list").mockImplementation(async () => {
+      listCalls++;
+      return {
+        keys: [{ name: `token:tok_${listCalls}`, metadata: { name: `T${listCalls}` } }],
+        list_complete: false,
+        cursor: `cursor_${listCalls}`,
+      } as any;
+    });
+
+    const res = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      headers: { Authorization: `Bearer ${initialToken}` },
+    });
+    expect(res.status).toBe(200);
+    expect(listCalls).toBe(5);
   });
 
   it("validates token expiry on creation (B5)", async () => {

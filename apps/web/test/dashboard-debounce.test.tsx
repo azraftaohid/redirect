@@ -113,4 +113,20 @@ describe("DashboardPage Search Debounce", () => {
       expect.objectContaining({ search: undefined })
     );
   });
+
+  it("safely sanitizes non-positive or invalid ?page= query parameter to page 1 with offset 0 (H3.1/B27)", async () => {
+    const originalSearch = window.location.search;
+    try {
+      window.history.replaceState(null, "", "/?page=-5");
+      await act(async () => {
+        render(<DashboardPage />);
+      });
+
+      expect(mockListLinks).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 0 })
+      );
+    } finally {
+      window.history.replaceState(null, "", originalSearch || "/");
+    }
+  });
 });

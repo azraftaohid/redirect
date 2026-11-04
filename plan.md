@@ -296,7 +296,7 @@ Work through the phases **in order** (H1 → H4). Each phase lists target files,
 
 ---
 
-### Phase H3 — UI Robustness & UX Hardening
+### Phase H3 — UI Robustness & UX Hardening — ✅ Completed
 
 **H3.1 — Dashboard Sanitization of `?page=` Query Parameter (B27)**
 - **Files:** `apps/web/src/pages/DashboardPage.tsx`, `apps/web/test/dashboard-debounce.test.tsx`

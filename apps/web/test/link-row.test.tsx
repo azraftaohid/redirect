@@ -113,4 +113,25 @@ describe("LinkRow Component", () => {
 
     expect(mockNavigate).not.toHaveBeenCalled();
   });
+
+  it("disables the active toggle switch when the link is expired (H3.2/B29)", () => {
+    const expiredLink: LinkRecord = {
+      ...dummyLink,
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    };
+
+    render(
+      <LinkRow
+        link={expiredLink}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onOpenEdit={vi.fn()}
+        onOpenQr={vi.fn()}
+      />
+    );
+
+    const switchBtn = screen.getByRole("switch");
+    expect(switchBtn).toBeDisabled();
+    expect(screen.getByText("Expired")).toBeInTheDocument();
+  });
 });
