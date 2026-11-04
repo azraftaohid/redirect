@@ -14,11 +14,13 @@ export const authMiddleware: MiddlewareHandler<AppContext> = async (c, next) => 
     }
   }
 
-  // Lazy bootstrap on unauthenticated request
-  try {
-    await ensureInitialToken(c.env);
-  } catch (err) {
-    console.error("Error in ensureInitialToken during auth failure:", err);
+  // Lazy bootstrap on unauthenticated verify request (Decision F6 / H2.2)
+  if (c.req.path === "/api/v1/auth/verify" && !token) {
+    try {
+      await ensureInitialToken(c.env);
+    } catch (err) {
+      console.error("Error in ensureInitialToken during auth failure:", err);
+    }
   }
 
   const { status, body } = formatErrorResponse(

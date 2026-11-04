@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import worker from "../src/index.js";
-import { recordClick } from "../src/utils/analytics.js";
+import { recordClick, normalizeReferrer, parseEnabledDimensions } from "../src/utils/analytics.js";
 import type { Env } from "../src/types.js";
 
 async function fetchWorker(
@@ -236,6 +236,12 @@ describe("Analytics & Click Recording", () => {
     });
     await recordClick(envBoth, testLinkId, reqReferrer);
 
+    // Request 3: Visit with multi-level subdomain referrer
+    const reqSubdomain = new Request("https://redirect.example.com/test", {
+      headers: { Referer: "https://random123.sub.twitter.com/path" },
+    });
+    await recordClick(envBoth, testLinkId, reqSubdomain);
+
     const dims = await env.DB.prepare(
       "SELECT dim, value, clicks FROM link_daily_dims WHERE link_id = ? ORDER BY dim, value"
     )
@@ -243,10 +249,24 @@ describe("Analytics & Click Recording", () => {
       .all<{ dim: string; value: string; clicks: number }>();
 
     expect(dims.results).toEqual([
-      { dim: "country", value: "XX", clicks: 2 },
+      { dim: "country", value: "XX", clicks: 3 },
       { dim: "referrer", value: "(direct)", clicks: 1 },
       { dim: "referrer", value: "github.com", clicks: 1 },
+      { dim: "referrer", value: "twitter.com", clicks: 1 },
     ]);
+  });
+
+  it("normalizes referrer hostnames to base domain and deduplicates dimension configs (H2.1, H2.3)", () => {
+    expect(parseEnabledDimensions("country,country,referrer")).toEqual(["country", "referrer"]);
+    expect(parseEnabledDimensions("referrer,REFERRER,country")).toEqual(["referrer", "country"]);
+
+    expect(normalizeReferrer("https://random123.sub.twitter.com/path")).toBe("twitter.com");
+    expect(normalizeReferrer("https://sub.bbc.co.uk/news")).toBe("bbc.co.uk");
+    expect(normalizeReferrer("http://localhost:3000/")).toBe("localhost");
+    expect(normalizeReferrer("https://192.168.1.1/dashboard")).toBe("192.168.1.1");
+    expect(normalizeReferrer("")).toBe("(direct)");
+    expect(normalizeReferrer(null)).toBe("(direct)");
+    expect(normalizeReferrer("invalid-url")).toBe("(direct)");
   });
 
   it("returns daily series and only enabled dimensions on /stats endpoint (R3.5)", async () => {

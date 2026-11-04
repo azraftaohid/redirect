@@ -8,10 +8,37 @@ export const BOT_UA_REGEX =
 export function parseEnabledDimensions(raw?: string): AnalyticsDimension[] {
   if (!raw) return [];
   const validDims: AnalyticsDimension[] = ["country", "referrer"];
-  return raw
-    .split(",")
-    .map((d) => d.trim().toLowerCase())
-    .filter((d): d is AnalyticsDimension => validDims.includes(d as AnalyticsDimension));
+  const unique = Array.from(new Set(raw.split(",").map((d) => d.trim().toLowerCase())));
+  return unique.filter((d): d is AnalyticsDimension => validDims.includes(d as AnalyticsDimension));
+}
+
+export function normalizeReferrer(refererHeader?: string | null): string {
+  if (!refererHeader) return "(direct)";
+  try {
+    const parsed = new URL(refererHeader);
+    if (!parsed.hostname || !/^[a-z0-9.-]+$/i.test(parsed.hostname)) {
+      return "(direct)";
+    }
+    let host = parsed.hostname.toLowerCase().replace(/\.+$/, "");
+    // If IPv4 or simple localhost, return as-is
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === "localhost") {
+      return host.slice(0, 64);
+    }
+    // Collapse arbitrary subdomains to base registrable domain (e.g. uuid.twitter.com -> twitter.com)
+    const parts = host.split(".");
+    if (parts.length > 2) {
+      const twoPartTlds = ["co.uk", "com.au", "co.jp", "org.uk", "gov.uk", "edu.au", "ac.uk", "net.au"];
+      const lastTwo = parts.slice(-2).join(".");
+      if (twoPartTlds.includes(lastTwo) && parts.length > 3) {
+        host = parts.slice(-3).join(".");
+      } else if (!twoPartTlds.includes(lastTwo)) {
+        host = parts.slice(-2).join(".");
+      }
+    }
+    return host.slice(0, 64);
+  } catch {
+    return "(direct)";
+  }
 }
 
 /**
@@ -89,18 +116,8 @@ export async function recordClick(
         ).bind(linkId, day, "country", country)
       );
     } else if (dim === "referrer") {
-      let referrer = "(direct)";
       const refererHeader = request.headers.get("referer") || request.headers.get("referrer");
-      if (refererHeader) {
-        try {
-          const parsed = new URL(refererHeader);
-          if (parsed.hostname) {
-            referrer = parsed.hostname.toLowerCase().slice(0, 64);
-          }
-        } catch {
-          // ignore invalid URLs, keep "(direct)"
-        }
-      }
+      const referrer = normalizeReferrer(refererHeader);
       statements.push(
         env.DB.prepare(
           "INSERT INTO link_daily_dims (link_id, day, dim, value, clicks) VALUES (?, ?, ?, ?, 1) ON CONFLICT (link_id, day, dim, value) DO UPDATE SET clicks = clicks + 1"

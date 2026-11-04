@@ -222,7 +222,7 @@ Work through the phases **in order** (H1 → H4). Each phase lists target files,
 
 ---
 
-### Phase H2 — Billing, Quota & Cardinality Protection
+### Phase H2 — Billing, Quota & Cardinality Protection — ✅ Completed
 
 **H2.1 — Unbounded Referrer Cardinality Mitigation in D1 (B25)**
 - **Files:** `apps/api/src/utils/analytics.ts`, `apps/api/test/analytics.test.ts`

@@ -11,6 +11,25 @@ describe("Authentication & Token Management", () => {
     }
   });
 
+  it("does not trigger ensureInitialToken on arbitrary unauthenticated endpoints (H2.2/B26)", async () => {
+    // Before request, initial_token does not exist
+    const beforeToken = await env.AUTH_TOKENS.get("initial_token");
+    expect(beforeToken).toBeNull();
+
+    // Hitting /api/v1/links without token returns 401 but does NOT write initial_token
+    const resLinks = await SELF.fetch("https://redirect.example.com/api/v1/links");
+    expect(resLinks.status).toBe(401);
+    const tokenAfterLinks = await env.AUTH_TOKENS.get("initial_token");
+    expect(tokenAfterLinks).toBeNull();
+
+    // Hitting /api/v1/auth/verify without token returns 401 AND bootstraps initial_token
+    const resVerify = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    expect(resVerify.status).toBe(401);
+    const tokenAfterVerify = await env.AUTH_TOKENS.get("initial_token");
+    expect(tokenAfterVerify).not.toBeNull();
+    expect(tokenAfterVerify).toMatch(/^rdir_initial_[A-Za-z0-9]{32}$/);
+  });
+
   it("returns 401 and lazily bootstraps initial_token on unauthenticated request", async () => {
     // Before request, initial_token does not exist
     const beforeToken = await env.AUTH_TOKENS.get("initial_token");
