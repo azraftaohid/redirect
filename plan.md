@@ -6,7 +6,7 @@ The project is **pre-release**: data formats, KV layout, API shapes, and the D1 
 
 ## How to Use This Plan
 
-1. **Parts I, II, and III** are fully completed and verified (93 passing tests).
+1. **Parts I, II, III, and V** are fully completed and verified (98 passing tests).
 2. Toolchain: Node 20+ and the pnpm version pinned in root `package.json` (`packageManager`) must be on `PATH`. Do not hardcode machine-specific paths in code, scripts, or docs.
 3. Never weaken an Authoritative Decision (§1) to make a test pass. If a decision blocks a correct fix, stop and report.
 4. **Part IV (future feature backlog)** is for assessment and future implementation.
@@ -20,6 +20,7 @@ The project is **pre-release**: data formats, KV layout, API shapes, and the D1 
 | **Part I** | Monorepo, `@redirect/shared`, `@redirect/api` (Phases 1–9) | ✅ Completed — 49 workerd tests |
 | **Part II** | `@redirect/web` SPA & PWA (Phases F1–F8) | ✅ Completed — 31 jsdom tests |
 | **Part III** | Correctness, cost/latency, token storage redesign, cleanup (Phases R0–R12) | ✅ Completed — 93 tests (commits `22f0083`, `e3d2493`) |
+| **Part V** | Post-Release Hardening: Loophole, Cost & App Logic Fixes (Phases H1–H4) | ✅ Completed — 98 tests passing |
 | **Part IV** | Future feature backlog (Tiers A, B, C) | 🧭 Backlog for future assessment |
 
 ---
@@ -350,13 +351,13 @@ Work through the phases **in order** (H1 → H4). Each phase lists target files,
 
 ---
 
-### Phase H4 — Final Verification & Release Check
+### Phase H4 — Final Verification & Release Check — ✅ Completed
 
-- [ ] All workspace packages pass strict typechecking: `pnpm typecheck`.
-- [ ] Complete test suite passes: `pnpm test` (assert all tests green).
-- [ ] Production build succeeds: `pnpm build`.
-- [ ] Distribution verification passes: `node apps/api/scripts/verify-dist.mjs`.
-- [ ] No regression in bundle size or code-split chunks.
+- [x] All workspace packages pass strict typechecking: `pnpm typecheck`.
+- [x] Complete test suite passes: `pnpm test` (assert all tests green: 64 API + 34 Web).
+- [x] Production build succeeds: `pnpm build`.
+- [x] Distribution verification passes: `node apps/api/scripts/verify-dist.mjs`.
+- [x] No regression in bundle size or code-split chunks (entry chunk ~463 kB, lazy routes isolated).
 
 ---
 
