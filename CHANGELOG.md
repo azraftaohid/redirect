@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-14
+
+### Changed
+
+- Removed link import/export buttons from the Links dashboard tab, keeping them solely in **Settings → Data Portability**.
+
+### Fixed
+
+- Grouped each link item's active toggle and clicks pill on the left on mobile viewports while aligning the actions menu on the right.
+
 ## [0.2.1] - 2026-11-14
 
 ### Fixed

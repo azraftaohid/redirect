@@ -222,31 +222,33 @@ export function LinkRow({
 
           {/* Right Column: Active Switch, Stats Pill & Dropdown */}
           <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-100 dark:border-zinc-800">
-            {/* Active Toggle */}
-            <div
-              className="flex items-center gap-2"
-              title={expired ? "Cannot activate an expired link. Edit the link to extend or clear expiration." : undefined}
-            >
-              <Switch
-                checked={link.isActive}
-                onCheckedChange={handleToggleActive}
-                disabled={isUpdatingActive || expired}
-                aria-label={`Toggle active status for /${link.slug}`}
-              />
-            </div>
-
-            {/* Stats Pill Link */}
-            <Link href={`/links/${link.id}`}>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 text-xs font-semibold px-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                title="View link analytics"
+            <div className="flex items-center gap-3">
+              {/* Active Toggle */}
+              <div
+                className="flex items-center gap-2"
+                title={expired ? "Cannot activate an expired link. Edit the link to extend or clear expiration." : undefined}
               >
-                <BarChart2 className="w-3.5 h-3.5 text-zinc-500" />
-                <span>{link.clickCount.toLocaleString()} clicks</span>
-              </Button>
-            </Link>
+                <Switch
+                  checked={link.isActive}
+                  onCheckedChange={handleToggleActive}
+                  disabled={isUpdatingActive || expired}
+                  aria-label={`Toggle active status for /${link.slug}`}
+                />
+              </div>
+
+              {/* Stats Pill Link */}
+              <Link href={`/links/${link.id}`}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs font-semibold px-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  title="View link analytics"
+                >
+                  <BarChart2 className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>{link.clickCount.toLocaleString()} clicks</span>
+                </Button>
+              </Link>
+            </div>
 
             {/* Actions Dropdown */}
             <DropdownMenu>

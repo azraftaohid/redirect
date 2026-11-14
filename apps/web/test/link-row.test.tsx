@@ -134,4 +134,31 @@ describe("LinkRow Component", () => {
     expect(switchBtn).toBeDisabled();
     expect(screen.getByText("Expired")).toBeInTheDocument();
   });
+
+  it("groups the active switch and clicks button on the left separately from the actions menu on mobile", () => {
+    render(
+      <LinkRow
+        link={dummyLink}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onOpenEdit={vi.fn()}
+        onOpenQr={vi.fn()}
+      />
+    );
+
+    const switchBtn = screen.getByRole("switch");
+    const clicksBtn = screen.getByRole("button", { name: /42 clicks/i });
+    const actionsBtn = screen.getByRole("button", { name: /actions/i });
+
+    const leftGroup = switchBtn.closest("div.flex.items-center.gap-3")!;
+    expect(leftGroup).not.toBeNull();
+    expect(leftGroup).toContainElement(switchBtn);
+    expect(leftGroup).toContainElement(clicksBtn);
+    expect(leftGroup).not.toContainElement(actionsBtn);
+
+    const controlsRow = leftGroup.parentElement!;
+    expect(controlsRow.className).toContain("justify-between");
+    expect(controlsRow.className).toContain("sm:justify-end");
+    expect(controlsRow).toContainElement(actionsBtn);
+  });
 });

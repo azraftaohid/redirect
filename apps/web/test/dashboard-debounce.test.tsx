@@ -8,8 +8,6 @@ vi.mock("@/api/client", () => ({
   createLink: vi.fn(),
   updateLink: vi.fn(),
   deleteLink: vi.fn(),
-  exportAllLinks: vi.fn(),
-  importLinksChunked: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({
@@ -130,5 +128,14 @@ describe("DashboardPage Search Debounce", () => {
     } finally {
       window.history.replaceState(null, "", originalSearch || "/");
     }
+  });
+
+  it("does not render import or export buttons on the Links dashboard", async () => {
+    await act(async () => {
+      render(<DashboardPage />);
+    });
+
+    expect(screen.queryByRole("button", { name: /export/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /import/i })).not.toBeInTheDocument();
   });
 });

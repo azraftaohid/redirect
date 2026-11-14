@@ -1,6 +1,6 @@
 # Redirect
 
-A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers (`v0.2.1` — see [CHANGELOG.md](CHANGELOG.md)).
+A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers (`v0.2.2` — see [CHANGELOG.md](CHANGELOG.md)).
 
 Designed as a single Cloudflare Worker with Static Assets, Redirect handles public link redirection with sub-second response times, provides a token-authenticated management API, and features a frontend management application served under `/app/`.
 
@@ -287,9 +287,9 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backu
    pnpm --filter @redirect/api exec wrangler d1 time-travel restore redirect-db --remote --bookmark=<bookmark-id>
    ```
 
-3. **Portable Links JSON Export & Import (Dashboard / Settings / API):**
+3. **Portable Links JSON Export & Import (Settings / API):**
 
-   In addition to full-database D1 backups, Redirect supports links-only versioned JSON export and import (`version: 1`) from the **Dashboard** and **Settings → Data Portability** views, or directly via the authenticated API:
+   In addition to full-database D1 backups, Redirect supports links-only versioned JSON export and import (`version: 1`) from **Settings → Data Portability** or directly via the authenticated API:
 
    - `GET /api/v1/links/export` — Streams links as cursor-paginated JSON (`limit` default `200`, max `500`, optional `search`, `tag`, `isActive` filters). Exports exclude analytics (`clickCount`, daily aggregates) and API tokens.
    - `POST /api/v1/links/import` — Imports up to `500` links per request (`onConflict`: `"skip"` default, or `"overwrite"`).
