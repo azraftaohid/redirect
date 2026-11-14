@@ -1,6 +1,6 @@
 # Redirect
 
-A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers (`v0.2.0` — see [CHANGELOG.md](CHANGELOG.md)).
+A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers (`v0.2.1` — see [CHANGELOG.md](CHANGELOG.md)).
 
 Designed as a single Cloudflare Worker with Static Assets, Redirect handles public link redirection with sub-second response times, provides a token-authenticated management API, and features a frontend management application served under `/app/`.
 

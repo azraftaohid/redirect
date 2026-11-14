@@ -102,11 +102,11 @@ export function QrCodeModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <QrCode className="w-5 h-5" />
-            <span>QR Code: /{slug}</span>
+      <DialogContent className="w-[calc(100%-2rem)] sm:w-full sm:max-w-lg">
+        <DialogHeader className="min-w-0">
+          <DialogTitle className="flex items-center gap-2 min-w-0">
+            <QrCode className="w-5 h-5 shrink-0" />
+            <span className="truncate">QR Code: /{slug}</span>
           </DialogTitle>
           <DialogDescription className="truncate text-xs">
             Directs to {targetUrl}
@@ -114,7 +114,7 @@ export function QrCodeModal({
         </DialogHeader>
 
         <div className="flex flex-col items-center justify-center p-4">
-          <div className="w-64 h-64 bg-white p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xs flex items-center justify-center">
+          <div className="w-64 h-64 max-w-full aspect-square bg-white p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xs flex items-center justify-center">
             {loading ? (
               <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
             ) : svgContent ? (
@@ -126,20 +126,25 @@ export function QrCodeModal({
               <span className="text-xs text-zinc-400">Unable to render preview</span>
             )}
           </div>
-          <p className="mt-3 font-mono text-xs text-zinc-500 dark:text-zinc-400 select-all">
+          <p className="mt-3 max-w-full break-all text-center font-mono text-xs text-zinc-500 dark:text-zinc-400 select-all">
             {shortUrl}
           </p>
         </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
+        <DialogFooter className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2 sm:space-x-0">
           <Button
             variant="outline"
             size="sm"
             onClick={handleCopyImage}
             disabled={loading || copyingImg}
-            className="w-full sm:w-auto gap-1.5"
+            className="w-full min-w-0 gap-1.5"
+            title="Copy QR code PNG image to clipboard"
           >
-            {copiedImg ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+            {copiedImg ? (
+              <Check className="w-4 h-4 shrink-0 text-emerald-600" />
+            ) : (
+              <Copy className="w-4 h-4 shrink-0" />
+            )}
             <span>{copyingImg ? "Copying..." : "Copy Image"}</span>
           </Button>
 
@@ -148,9 +153,10 @@ export function QrCodeModal({
             size="sm"
             onClick={handleDownloadSvg}
             disabled={loading || !svgContent}
-            className="w-full sm:w-auto gap-1.5"
+            className="w-full min-w-0 gap-1.5"
+            title="Download vector SVG QR code"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4 h-4 shrink-0" />
             <span>Download SVG</span>
           </Button>
 
@@ -158,10 +164,11 @@ export function QrCodeModal({
             size="sm"
             onClick={handleDownloadPng}
             disabled={loading || downloadingPng}
-            className="w-full sm:w-auto gap-1.5"
+            className="w-full min-w-0 gap-1.5"
+            title="Download 1024×1024px PNG QR code"
           >
-            <Download className="w-4 h-4" />
-            <span>{downloadingPng ? "Generating..." : "Download PNG (1024px)"}</span>
+            <Download className="w-4 h-4 shrink-0" />
+            <span>{downloadingPng ? "Generating..." : "Download PNG"}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
