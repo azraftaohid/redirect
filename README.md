@@ -326,6 +326,21 @@ pnpm test
 pnpm dev
 ```
 
+### Local Network & Tailscale Testing (HTTPS)
+
+By default, Vite binds to `localhost`, and browsers restrict Secure Context APIs (`navigator.clipboard` for copying short links/tokens/QR images, Service Worker registration, and PWA/Web Share Target) over plain HTTP on non-`localhost` addresses.
+
+1. **Allow network access & MagicDNS hostnames:** `apps/web/vite.config.ts` configures `server.host: true` and `server.allowedHosts` (including `.local` and `.ts.net`). Only port `5173` needs to be reachable—Vite proxies `/api` and `/:slug` locally to `wrangler dev` on `http://127.0.0.1:8787`. Add any extra host aliases to `OWN_HOSTNAMES` in `apps/api/.dev.vars` if you want cross-alias loop prevention.
+2. **Expose over HTTPS with Tailscale Serve:** On the host machine logged into Tailscale (even when `pnpm dev` runs inside a container such as `code-server` with port `5173` published to the host), run:
+
+   ```bash
+   tailscale serve --bg 5173
+   ```
+
+   Open `https://<machine>.<tailnet>.ts.net/app/` from any device on your tailnet. Manage or stop the proxy with `tailscale serve status` and `tailscale serve reset`.
+   - **Built Worker / Service Worker testing:** `sw.js` only registers in production builds—run `pnpm build && pnpm --filter @redirect/api exec wrangler dev` and point `tailscale serve --bg 8787` at port `8787`.
+   - **SSH tunnel alternative:** Run `ssh -L 5173:127.0.0.1:5173 <host>` from another machine and open `http://localhost:5173/app/`.
+
 ### API Endpoints Reference
 
 All `/api/v1/*` endpoints require a valid bearer token (`Authorization: Bearer <token>` or `X-API-Key: <token>`):

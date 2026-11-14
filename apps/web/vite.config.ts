@@ -1,9 +1,9 @@
-import { defineConfig, type Plugin } from "vite";
-import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import path from "node:path";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import react from "@vitejs/plugin-react";
 import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { defineConfig, type Plugin } from "vite";
 
 function copy404Plugin(): Plugin {
   return {
@@ -71,6 +71,8 @@ export default defineConfig({
   plugins: [tailwindcss(), react(), copy404Plugin(), injectBuildIdPlugin(), devRootRedirectPlugin()],
   server: {
     port: 5173,
+    host: true,
+    allowedHosts: ["orbit-3", "atlas-1", ".local", ".ts.net"],
     proxy: {
       "/api": {
         target: "http://127.0.0.1:8787",
