@@ -22,15 +22,13 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "redirect-db",
-      "database_id": "REPLACE_ME",
+      "database_name": "redirect-prod",
       "migrations_dir": "migrations"
     }
   ],
   "kv_namespaces": [
     {
-      "binding": "AUTH_TOKENS",
-      "id": "REPLACE_ME"
+      "binding": "AUTH_TOKENS"
     }
   ],
   "vars": {

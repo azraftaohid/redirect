@@ -50,51 +50,56 @@ Clone the repository and install workspace dependencies:
 pnpm install
 ```
 
-### Provision Cloudflare Resources
+### Configure & Provision Cloudflare Resources
 
-1. **Create the D1 database:**
+`apps/api/wrangler.jsonc` uses Wrangler's **Automatic Resource Provisioning**—`database_id` and KV `id` are intentionally omitted so you don't have to commit account-specific UUIDs.
 
-   ```bash
-   pnpm --filter @redirect/api exec wrangler d1 create redirect-db
-   ```
+1. **Configure your domain in `apps/api/wrangler.jsonc`:**
 
-   Copy the returned `database_id`.
-
-2. **Create the KV namespace:**
-
-   ```bash
-   pnpm --filter @redirect/api exec wrangler kv namespace create AUTH_TOKENS
-   ```
-
-   Copy the returned namespace `id`.
-
-3. **Configure `apps/api/wrangler.jsonc`:**
-
-   Open `apps/api/wrangler.jsonc` and paste your IDs:
+   Update `routes` with your custom domain (keep `d1_databases` and `kv_namespaces` as-is unless you want to pin explicit IDs):
 
    ```jsonc
+   "routes": [
+     { "pattern": "go.yourdomain.com", "custom_domain": true }
+   ],
    "d1_databases": [
      {
        "binding": "DB",
-       "database_name": "redirect-db",
-       "database_id": "<PASTE_D1_DATABASE_ID_HERE>",
+       "database_name": "redirect-prod",
        "migrations_dir": "migrations"
      }
    ],
    "kv_namespaces": [
      {
-       "binding": "AUTH_TOKENS",
-       "id": "<PASTE_KV_NAMESPACE_ID_HERE>"
+       "binding": "AUTH_TOKENS"
      }
-   ],
-   "routes": [
-     { "pattern": "go.yourdomain.com", "custom_domain": true }
    ]
    ```
 
-4. **Apply database migrations:**
+2. **Deploy & auto-provision resources (or pre-create them first):**
 
-   - For remote production:
+   - **Automatic (simplest):** Run `pnpm deploy` directly. Wrangler will automatically create the `redirect-prod` D1 database and `redirect-auth-tokens` KV namespace on your account, bind them, and deploy the Worker:
+
+     ```bash
+     pnpm deploy
+     ```
+
+     > **Note:** Interactive `wrangler deploy` writes the provisioned IDs back into `apps/api/wrangler.jsonc`. You can keep them or discard those config changes—subsequent deploys will continue resolving `redirect-prod` by name and inheriting `AUTH_TOKENS`.
+
+   - **Pre-created / Dashboard-bound (zero-downtime migrations):** If you prefer to migrate D1 before the first deploy or bind an existing KV namespace via the Dashboard:
+
+     ```bash
+     # Optional: create D1 ahead of time (Wrangler connects by database_name on deploy)
+     pnpm --filter @redirect/api exec wrangler d1 create redirect-prod
+     pnpm db:migrate:remote
+
+     # Optional: create a KV namespace (paste its id in wrangler.jsonc, or bind it to AUTH_TOKENS in the Dashboard after first deploy)
+     pnpm --filter @redirect/api exec wrangler kv namespace create AUTH_TOKENS
+     ```
+
+3. **Apply database migrations:**
+
+   - For remote production (if not already run before deploy):
 
      ```bash
      pnpm db:migrate:remote
@@ -105,12 +110,6 @@ pnpm install
      ```bash
      pnpm db:migrate:local
      ```
-
-5. **Deploy the Worker:**
-
-   ```bash
-   pnpm deploy
-   ```
 
 ---
 
@@ -131,7 +130,7 @@ Redirect employs a zero-lockout lazy bootstrapping mechanism for API authenticat
 2. **Retrieve the token in production:**
 
    - Log in to the [Cloudflare Dashboard](https://dash.cloudflare.com/).
-   - Navigate to **Storage & Databases** → **KV** → `AUTH_TOKENS`.
+   - Navigate to **Storage & Databases** → **KV** → the namespace bound to `AUTH_TOKENS` (auto-provisioned as `redirect-auth-tokens`).
    - View the plaintext value of the `initial_token` key and copy it.
 
 3. **Retrieve the token in local development (`pnpm dev`):**
@@ -272,7 +271,7 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backu
 1. **Export Database to SQL:**
 
    ```bash
-   pnpm --filter @redirect/api exec wrangler d1 export redirect-db --remote --output=./backup.sql
+   pnpm --filter @redirect/api exec wrangler d1 export redirect-prod --remote --output=./backup.sql
    ```
 
 2. **D1 Time Travel (Point-in-Time Recovery):**
@@ -281,10 +280,10 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backu
 
    ```bash
    # View bookmark timestamps
-   pnpm --filter @redirect/api exec wrangler d1 time-travel info redirect-db --remote
+   pnpm --filter @redirect/api exec wrangler d1 time-travel info redirect-prod --remote
 
    # Restore database to a specific bookmark
-   pnpm --filter @redirect/api exec wrangler d1 time-travel restore redirect-db --remote --bookmark=<bookmark-id>
+   pnpm --filter @redirect/api exec wrangler d1 time-travel restore redirect-prod --remote --bookmark=<bookmark-id>
    ```
 
 3. **Portable Links JSON Export & Import (Settings / API):**
