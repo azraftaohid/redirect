@@ -14,3 +14,12 @@ export const DEFAULT_SLUG_LENGTH = 6;
 
 export const ANALYTICS_DIMENSIONS = ["country", "referrer"] as const;
 export type AnalyticsDimension = (typeof ANALYTICS_DIMENSIONS)[number];
+
+export const EXPORT_SCHEMA_VERSION = 1 as const;
+export const EXPORT_DEFAULT_LIMIT = 500 as const;
+export const EXPORT_MAX_LIMIT = 1000 as const;
+export const IMPORT_MAX_BATCH_SIZE = 500 as const;
+export const IMPORT_CLIENT_CHUNK_SIZE = 200 as const;
+
+export const IMPORT_CONFLICT_MODES = ["skip", "overwrite"] as const;
+export type ImportConflictMode = (typeof IMPORT_CONFLICT_MODES)[number];

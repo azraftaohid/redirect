@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import {
   createLinkSchema,
+  exportLinksQuerySchema,
+  EXPORT_SCHEMA_VERSION,
+  importLinksEnvelopeSchema,
   listLinksQuerySchema,
   updateLinkSchema,
   validateSlug,
@@ -10,13 +13,17 @@ import {
   DEFAULT_SLUG_LENGTH,
   generateValidRandomSlug,
   type LinkRecord,
+  type LinksExportEnvelope,
 } from "@redirect/shared";
 import type { AppContext } from "../types.js";
 import { ApiError } from "../errors.js";
 import {
   createLinkRecord,
+  decodeExportCursor,
   deleteLinkRecord,
+  exportLinks,
   getLinkById,
+  importLinksBatch,
   listLinks,
   updateLinkRecord,
 } from "../db/links.js";
@@ -100,6 +107,56 @@ linksRouter.post(
     }
 
     return c.json(record, 201, { "Cache-Control": "no-store" });
+  }
+);
+
+// GET /api/v1/links/export (must be registered before /links/:id)
+linksRouter.get(
+  "/links/export",
+  zValidator("query", exportLinksQuerySchema, (result) => {
+    if (!result.success) {
+      throw new ApiError(400, "validation_error", "Invalid query parameters", result.error.issues);
+    }
+  }),
+  async (c) => {
+    const query = c.req.valid("query");
+    const decodedCursor = query.cursor ? decodeExportCursor(query.cursor) : null;
+    if (query.cursor && !decodedCursor) {
+      throw new ApiError(400, "invalid_cursor", "Invalid pagination cursor.");
+    }
+
+    const result = await exportLinks(c.env.DB, query, decodedCursor);
+    const exportedAt = new Date().toISOString();
+    const datePart = exportedAt.slice(0, 10);
+
+    const body: LinksExportEnvelope = {
+      version: EXPORT_SCHEMA_VERSION,
+      exportedAt,
+      count: result.links.length,
+      links: result.links,
+      pagination: result.pagination,
+    };
+
+    return c.json(body, 200, {
+      "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="redirect-links-${datePart}.json"`,
+    });
+  }
+);
+
+// POST /api/v1/links/import (must be registered before /links/:id)
+linksRouter.post(
+  "/links/import",
+  zValidator("json", importLinksEnvelopeSchema, (result) => {
+    if (!result.success) {
+      throw new ApiError(400, "validation_error", "Validation failed", result.error.issues);
+    }
+  }),
+  async (c) => {
+    const body = c.req.valid("json");
+    const ownHostnames = parseOwnHostnames(new URL(c.req.url).hostname, c.env.OWN_HOSTNAMES);
+    const result = await importLinksBatch(c.env.DB, body.links, body.onConflict, ownHostnames);
+    return c.json(result, 200, { "Cache-Control": "no-store" });
   }
 );
 

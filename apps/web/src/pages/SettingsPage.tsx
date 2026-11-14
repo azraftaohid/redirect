@@ -8,6 +8,8 @@ import {
   rotateInitialToken,
 } from "@/api/client";
 import { formatDisplayDate } from "@/utils/dates";
+import { exportAndDownloadLinks } from "@/utils/transfer";
+import { ImportLinksModal } from "@/components/ImportLinksModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +52,8 @@ import {
   ShieldCheck,
   Loader2,
   ShieldAlert,
+  Download,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -81,6 +85,10 @@ export function SettingsPage(): React.ReactElement {
   // Rotate initial token alert
   const [rotateAlertOpen, setRotateAlertOpen] = useState(false);
   const [rotating, setRotating] = useState(false);
+
+  // Import & Export
+  const [exportingLinks, setExportingLinks] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   const storedToken = activeToken || "";
   const hasInitialToken = tokens.some((t) => t.isInitial);
@@ -201,6 +209,19 @@ export function SettingsPage(): React.ReactElement {
       setTimeout(() => setCopiedRevealedToken(false), 2000);
     } catch {
       toast.error("Failed to copy token");
+    }
+  }
+
+  async function handleExportAllLinks() {
+    if (exportingLinks) return;
+    setExportingLinks(true);
+    try {
+      const envelope = await exportAndDownloadLinks();
+      toast.success(`Exported ${envelope.count} link(s) to JSON`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to export links");
+    } finally {
+      setExportingLinks(false);
     }
   }
 
@@ -390,6 +411,44 @@ export function SettingsPage(): React.ReactElement {
         </CardContent>
       </Card>
 
+      {/* Data Portability Card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Data Portability (Import &amp; Export)</CardTitle>
+          <CardDescription>
+            Export all short links and metadata as versioned JSON (excluding analytics and API tokens), or import links from an export file.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleExportAllLinks}
+            disabled={exportingLinks}
+            className="h-9 gap-1.5 text-sm"
+          >
+            {exportingLinks ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            <span>{exportingLinks ? "Exporting..." : "Export All Links (JSON)"}</span>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setImportModalOpen(true)}
+            className="h-9 gap-1.5 text-sm"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Import Links (JSON)</span>
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Create Token Modal */}
       <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
         <DialogContent className="sm:max-w-md">
@@ -540,6 +599,13 @@ export function SettingsPage(): React.ReactElement {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Import Links Modal */}
+      <ImportLinksModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onSuccess={() => {}}
+      />
     </div>
   );
 }

@@ -8,6 +8,8 @@ vi.mock("@/api/client", () => ({
   createLink: vi.fn(),
   updateLink: vi.fn(),
   deleteLink: vi.fn(),
+  exportAllLinks: vi.fn(),
+  importLinksChunked: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({

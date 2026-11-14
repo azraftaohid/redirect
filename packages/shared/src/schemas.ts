@@ -1,5 +1,10 @@
 import { z } from "zod";
 import {
+  EXPORT_DEFAULT_LIMIT,
+  EXPORT_MAX_LIMIT,
+  EXPORT_SCHEMA_VERSION,
+  IMPORT_CONFLICT_MODES,
+  IMPORT_MAX_BATCH_SIZE,
   MAX_TAG_LENGTH,
   MAX_TAGS,
   MAX_TITLE_LENGTH,
@@ -7,6 +12,7 @@ import {
   REDIRECT_STATUS_CODES,
   RedirectStatusCode,
   SLUG_REGEX,
+  type ImportConflictMode,
 } from "./constants.js";
 import { validateSlug } from "./validation.js";
 
@@ -193,4 +199,105 @@ export interface ApiErrorBody {
     message: string;
     details?: unknown;
   };
+}
+
+export const exportLinksQuerySchema = z.object({
+  search: z.string().max(200).optional(),
+  tag: z.string().max(MAX_TAG_LENGTH).optional(),
+  isActive: z.enum(["true", "false"]).optional(),
+  limit: z.coerce.number().int().min(1).max(EXPORT_MAX_LIMIT).default(EXPORT_DEFAULT_LIMIT),
+  cursor: z.string().min(1).max(512).optional(),
+});
+export type ExportLinksQuery = z.infer<typeof exportLinksQuerySchema>;
+
+export const importLinkItemSchema = z.object({
+  slug: linkBaseFields.slug.optional(),
+  targetUrl: linkBaseFields.targetUrl,
+  title: linkBaseFields.title,
+  statusCode: linkBaseFields.statusCode.optional(),
+  tags: linkBaseFields.tags.optional(),
+  isActive: linkBaseFields.isActive.optional(),
+  forwardQuery: linkBaseFields.forwardQuery.optional(),
+  // Past expiresAt values are intentionally permitted for round-trip backup imports;
+  // redirect lookup enforces expiration at request time.
+  expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
+  createdAt: z.iso.datetime({ offset: true }).optional(),
+  updatedAt: z.iso.datetime({ offset: true }).optional(),
+});
+export type ImportLinkInput = z.infer<typeof importLinkItemSchema>;
+
+export const importLinksEnvelopeSchema = z.object({
+  version: z.literal(EXPORT_SCHEMA_VERSION),
+  onConflict: z.enum(IMPORT_CONFLICT_MODES).default("skip"),
+  links: z
+    .array(z.unknown())
+    .min(1, "At least one link is required")
+    .max(
+      IMPORT_MAX_BATCH_SIZE,
+      `Cannot import more than ${IMPORT_MAX_BATCH_SIZE} links per request`
+    ),
+});
+export type ImportLinksEnvelope = z.infer<typeof importLinksEnvelopeSchema>;
+
+export interface ExportedLink {
+  slug: string;
+  targetUrl: string;
+  title: string | null;
+  statusCode: RedirectStatusCode;
+  tags: string[];
+  isActive: boolean;
+  forwardQuery: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LinksExportEnvelope {
+  version: typeof EXPORT_SCHEMA_VERSION;
+  exportedAt: string;
+  count: number;
+  links: ExportedLink[];
+  pagination?: {
+    limit: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+
+export interface ImportLinksRequest {
+  version: typeof EXPORT_SCHEMA_VERSION;
+  onConflict?: ImportConflictMode;
+  links: ImportLinkInput[];
+}
+
+export interface ImportItemError {
+  index: number;
+  slug: string | null;
+  code: string;
+  message: string;
+}
+
+export interface ImportItemResult {
+  index: number;
+  slug: string;
+  status: "created" | "updated" | "skipped" | "failed";
+  id?: string;
+  reason?: string;
+}
+
+export interface ImportLinksResponse {
+  version: typeof EXPORT_SCHEMA_VERSION;
+  onConflict: ImportConflictMode;
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+  };
+  skippedSlugs: string[];
+  createdSlugs: string[];
+  updatedSlugs: string[];
+  errors: ImportItemError[];
+  results: ImportItemResult[];
 }

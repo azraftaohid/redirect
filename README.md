@@ -260,7 +260,7 @@ Analytics writes run inside `ctx.waitUntil()` as a single non-blocking batch. If
 
 ## 6. Backups & Disaster Recovery
 
-Because Redirect uses standard Cloudflare D1 SQLite storage, backups and point-in-time recovery do not require custom API endpoints:
+Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backups and point-in-time recovery work directly through D1, alongside application-level links JSON export/import:
 
 1. **Export Database to SQL:**
 
@@ -279,6 +279,17 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, backups and point-i
    # Restore database to a specific bookmark
    pnpm --filter @redirect/api exec wrangler d1 time-travel restore redirect-db --remote --bookmark=<bookmark-id>
    ```
+
+3. **Portable Links JSON Export & Import (Dashboard / Settings / API):**
+
+   In addition to full-database D1 backups, Redirect supports links-only versioned JSON export and import (`version: 1`) from the **Dashboard** and **Settings → Data Portability** views, or directly via the authenticated API:
+
+   - `GET /api/v1/links/export` — Streams links as cursor-paginated JSON (`limit` default `200`, max `500`, optional `search`, `tag`, `isActive` filters). Exports exclude analytics (`clickCount`, daily aggregates) and API tokens.
+   - `POST /api/v1/links/import` — Imports up to `500` links per request (`onConflict`: `"skip"` default, or `"overwrite"`).
+     - **Skip (`onConflict: "skip"`):** Keeps existing links untouched and returns skipped slugs in `skippedSlugs` and per-item `results`.
+     - **Overwrite (`onConflict: "overwrite"`):** Updates existing links by slug while preserving their `id`, `created_at`, and click analytics. Omitted optional fields preserve existing values on overwrite rather than resetting to defaults.
+     - **Past `expiresAt` values:** Intentionally allowed on import for round-trip backup fidelity; expired links continue to evaluate expiration at redirect time.
+     - Larger files sent from the web UI are automatically chunked into `200`-link requests.
 
 ---
 

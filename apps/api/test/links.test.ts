@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env, SELF } from "cloudflare:test";
+import { importLinksBatch } from "../src/db/links.js";
 
 describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
   let authToken: string;
@@ -456,5 +457,602 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
       { headers: authHeaders() }
     );
     expect(statsRes.status).toBe(404);
+  });
+
+  it("exports links as versioned JSON without analytics and supports filters", async () => {
+    const createRes = await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        targetUrl: "https://example.com/exported",
+        slug: "exp-1",
+        title: "Exported One",
+        statusCode: 302,
+        tags: ["Ops", "Launch"],
+        isActive: false,
+        forwardQuery: false,
+      }),
+    });
+    const created = (await createRes.json()) as any;
+    await env.DB.prepare(
+      "UPDATE links SET click_count = 42, last_clicked_at = '2026-11-01T00:00:00.000Z' WHERE id = ?"
+    )
+      .bind(created.id)
+      .run();
+
+    await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        targetUrl: "https://example.com/other",
+        slug: "exp-2",
+        tags: ["marketing"],
+        isActive: true,
+      }),
+    });
+
+    const exportRes = await SELF.fetch("https://redirect.example.com/api/v1/links/export", {
+      headers: authHeaders(),
+    });
+    expect(exportRes.status).toBe(200);
+    expect(exportRes.headers.get("Cache-Control")).toBe("no-store");
+    expect(exportRes.headers.get("Content-Disposition")).toContain("attachment;");
+
+    const body = (await exportRes.json()) as any;
+    expect(body.version).toBe(1);
+    expect(typeof body.exportedAt).toBe("string");
+    expect(body.count).toBe(2);
+    expect(body.links).toHaveLength(2);
+    expect(body.pagination.hasMore).toBe(false);
+    expect(body.pagination.nextCursor).toBeNull();
+
+    const first = body.links.find((l: any) => l.slug === "exp-1");
+    expect(first).toBeDefined();
+    expect(first.targetUrl).toBe("https://example.com/exported");
+    expect(first.title).toBe("Exported One");
+    expect(first.statusCode).toBe(302);
+    expect(first.tags).toEqual(["ops", "launch"]);
+    expect(first.isActive).toBe(false);
+    expect(first.forwardQuery).toBe(false);
+    expect(first.createdAt).toBeDefined();
+    expect(first.updatedAt).toBeDefined();
+    expect("id" in first).toBe(false);
+    expect("clickCount" in first).toBe(false);
+    expect("lastClickedAt" in first).toBe(false);
+
+    // Filter by tag and isActive
+    const filteredRes = await SELF.fetch(
+      "https://redirect.example.com/api/v1/links/export?tag=ops&isActive=false",
+      { headers: authHeaders() }
+    );
+    expect(filteredRes.status).toBe(200);
+    const filtered = (await filteredRes.json()) as any;
+    expect(filtered.count).toBe(1);
+    expect(filtered.links[0].slug).toBe("exp-1");
+  });
+
+  it("supports cursor-chunked export without duplicates or gaps and rejects invalid cursor", async () => {
+    for (let i = 1; i <= 5; i++) {
+      await SELF.fetch("https://redirect.example.com/api/v1/links", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          targetUrl: `https://example.com/p-${i}`,
+          slug: `chunk-${i}`,
+        }),
+      });
+    }
+
+    const collectedSlugs: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+
+    do {
+      pages++;
+      const qs = cursor ? `?limit=2&cursor=${encodeURIComponent(cursor)}` : "?limit=2";
+      const res = await SELF.fetch(`https://redirect.example.com/api/v1/links/export${qs}`, {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      for (const l of body.links) {
+        collectedSlugs.push(l.slug);
+      }
+      cursor = body.pagination.hasMore ? body.pagination.nextCursor : null;
+    } while (cursor);
+
+    expect(pages).toBe(3);
+    expect(collectedSlugs).toHaveLength(5);
+    expect(new Set(collectedSlugs).size).toBe(5);
+
+    const badCursorRes = await SELF.fetch(
+      "https://redirect.example.com/api/v1/links/export?cursor=not-valid-base64!",
+      { headers: authHeaders() }
+    );
+    expect(badCursorRes.status).toBe(400);
+    const badBody = (await badCursorRes.json()) as any;
+    expect(badBody.error.code).toBe("invalid_cursor");
+  });
+
+  it("imports links with default skip mode and reports skippedSlugs", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        targetUrl: "https://example.com/original",
+        slug: "existing-slug",
+        title: "Original",
+      }),
+    });
+
+    const importRes = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        links: [
+          {
+            slug: "existing-slug",
+            targetUrl: "https://example.com/should-not-overwrite",
+            title: "Changed",
+          },
+          {
+            slug: "fresh-slug",
+            targetUrl: "https://example.com/fresh",
+            tags: ["Imported"],
+          },
+          {
+            slug: "fresh-slug",
+            targetUrl: "https://example.com/duplicate-in-batch",
+          },
+        ],
+      }),
+    });
+
+    expect(importRes.status).toBe(200);
+    expect(importRes.headers.get("Cache-Control")).toBe("no-store");
+    const body = (await importRes.json()) as any;
+
+    expect(body.onConflict).toBe("skip");
+    expect(body.summary).toEqual({
+      total: 3,
+      created: 1,
+      updated: 0,
+      skipped: 2,
+      failed: 0,
+    });
+    expect(body.createdSlugs).toEqual(["fresh-slug"]);
+    expect(body.skippedSlugs).toEqual(["existing-slug", "fresh-slug"]);
+    expect(body.results).toHaveLength(3);
+    expect(body.results[0].status).toBe("skipped");
+    expect(body.results[0].slug).toBe("existing-slug");
+    expect(body.results[1].status).toBe("created");
+    expect(body.results[2].status).toBe("skipped");
+    expect(body.results[2].reason).toBe("duplicate_in_batch");
+
+    // Existing link must remain untouched
+    const existingRow = await env.DB.prepare("SELECT target_url, title FROM links WHERE slug = ?")
+      .bind("existing-slug")
+      .first<{ target_url: string; title: string }>();
+    expect(existingRow?.target_url).toBe("https://example.com/original");
+    expect(existingRow?.title).toBe("Original");
+  });
+
+  it("overwrites existing links in-place when onConflict is overwrite while preserving id and analytics", async () => {
+    const createRes = await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        targetUrl: "https://example.com/old-dest",
+        slug: "overwrite-me",
+        title: "Old Title",
+      }),
+    });
+    const original = (await createRes.json()) as any;
+
+    await env.DB.prepare("UPDATE links SET click_count = 77 WHERE id = ?")
+      .bind(original.id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO link_daily_clicks (link_id, day, clicks) VALUES (?, '2026-11-10', 77)"
+    )
+      .bind(original.id)
+      .run();
+
+    const importRes = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        onConflict: "overwrite",
+        links: [
+          {
+            slug: "overwrite-me",
+            targetUrl: "https://example.com/new-dest",
+            title: "Updated Title",
+            statusCode: 301,
+            tags: ["Updated"],
+            isActive: false,
+            forwardQuery: false,
+          },
+          {
+            slug: "new-one",
+            targetUrl: "https://example.com/brand-new",
+          },
+        ],
+      }),
+    });
+
+    expect(importRes.status).toBe(200);
+    const body = (await importRes.json()) as any;
+    expect(body.onConflict).toBe("overwrite");
+    expect(body.summary).toEqual({
+      total: 2,
+      created: 1,
+      updated: 1,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(body.updatedSlugs).toEqual(["overwrite-me"]);
+    expect(body.createdSlugs).toEqual(["new-one"]);
+    expect(body.skippedSlugs).toEqual([]);
+
+    const checkRow = await env.DB.prepare(
+      "SELECT id, target_url, title, status_code, click_count FROM links WHERE slug = ?"
+    )
+      .bind("overwrite-me")
+      .first<{
+        id: string;
+        target_url: string;
+        title: string;
+        status_code: number;
+        click_count: number;
+      }>();
+    expect(checkRow?.id).toBe(original.id);
+    expect(checkRow?.target_url).toBe("https://example.com/new-dest");
+    expect(checkRow?.title).toBe("Updated Title");
+    expect(checkRow?.status_code).toBe(301);
+    expect(checkRow?.click_count).toBe(77);
+
+    const dailyRow = await env.DB.prepare(
+      "SELECT clicks FROM link_daily_clicks WHERE link_id = ? AND day = '2026-11-10'"
+    )
+      .bind(original.id)
+      .first<{ clicks: number }>();
+    expect(dailyRow?.clicks).toBe(77);
+  });
+
+  it("allows past expiresAt on import, generates missing slugs, and reports per-item validation failures", async () => {
+    const importRes = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        links: [
+          {
+            slug: "past-expiry",
+            targetUrl: "https://example.com/expired",
+            expiresAt: "2020-01-01T00:00:00.000Z",
+          },
+          {
+            targetUrl: "https://example.com/auto-slug",
+          },
+          {
+            slug: "loop-bad",
+            targetUrl: "https://redirect.example.com/loop",
+          },
+          {
+            slug: "api",
+            targetUrl: "https://example.com/reserved",
+          },
+        ],
+      }),
+    });
+
+    expect(importRes.status).toBe(200);
+    const body = (await importRes.json()) as any;
+    expect(body.summary).toEqual({
+      total: 4,
+      created: 2,
+      updated: 0,
+      skipped: 0,
+      failed: 2,
+    });
+    expect(body.createdSlugs).toHaveLength(2);
+    expect(body.createdSlugs[0]).toBe("past-expiry");
+    expect(body.createdSlugs[1]).toMatch(/^[A-Za-z0-9_-]{6}$/);
+    expect(body.errors).toHaveLength(2);
+    expect(body.errors[0]).toMatchObject({
+      index: 2,
+      slug: "loop-bad",
+      code: "invalid_target_url",
+    });
+    expect(body.errors[1]).toMatchObject({
+      index: 3,
+      slug: "api",
+      code: "validation_error",
+    });
+  });
+
+  it("enforces auth and envelope validation on /export and /import", async () => {
+    const unauthExport = await SELF.fetch("https://redirect.example.com/api/v1/links/export");
+    expect(unauthExport.status).toBe(401);
+
+    const unauthImport = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        version: 1,
+        links: [{ slug: "unauth", targetUrl: "https://example.com" }],
+      }),
+    });
+    expect(unauthImport.status).toBe(401);
+
+    const badVersion = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 2,
+        links: [{ slug: "bad-ver", targetUrl: "https://example.com" }],
+      }),
+    });
+    expect(badVersion.status).toBe(400);
+
+    const badConflict = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        onConflict: "replace",
+        links: [{ slug: "bad-mode", targetUrl: "https://example.com" }],
+      }),
+    });
+    expect(badConflict.status).toBe(400);
+
+    const emptyLinks = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        links: [],
+      }),
+    });
+    expect(emptyLinks.status).toBe(400);
+
+    const tooManyLinks = Array.from({ length: 501 }, (_, idx) => ({
+      slug: `over-${idx}`,
+      targetUrl: `https://example.com/${idx}`,
+    }));
+    const oversizedRes = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        links: tooManyLinks,
+      }),
+    });
+    expect(oversizedRes.status).toBe(400);
+  });
+
+  it("normalizes timezone offsets on import, preserves createdAt/updatedAt, and prefixes field validation errors", async () => {
+    const res = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        links: [
+          {
+            slug: "tz-link",
+            targetUrl: "https://example.com/tz",
+            expiresAt: "2030-05-01T12:00:00+00:00",
+            createdAt: "2025-01-15T10:30:00+02:00",
+            updatedAt: "2025-02-01T08:00:00-05:00",
+          },
+          {
+            slug: "bad-url-item",
+            targetUrl: "not-a-valid-url",
+          },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.summary).toEqual({
+      total: 2,
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 1,
+    });
+    expect(body.errors[0].code).toBe("validation_error");
+    expect(body.errors[0].message).toMatch(/^targetUrl:/);
+
+    const row = await env.DB.prepare(
+      "SELECT expires_at, created_at, updated_at FROM links WHERE slug = ?"
+    )
+      .bind("tz-link")
+      .first<{ expires_at: string; created_at: string; updated_at: string }>();
+
+    expect(row).toEqual({
+      expires_at: "2030-05-01T12:00:00.000Z",
+      created_at: "2025-01-15T08:30:00.000Z",
+      updated_at: "2025-02-01T13:00:00.000Z",
+    });
+  });
+
+  it("uses merge-only overwrite semantics and keeps createdSlugs and updatedSlugs disjoint", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        slug: "merge-me",
+        targetUrl: "https://example.com/original",
+        title: "Keep Title",
+        statusCode: 301,
+        tags: ["docs"],
+        isActive: false,
+        forwardQuery: false,
+        expiresAt: "2030-01-01T00:00:00.000Z",
+      }),
+    });
+
+    const importRes = await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        onConflict: "overwrite",
+        links: [
+          {
+            slug: "merge-me",
+            targetUrl: "https://example.com/merged-dest",
+          },
+          {
+            slug: "inbatch-dup",
+            targetUrl: "https://example.com/v1",
+            title: "V1 Title",
+          },
+          {
+            slug: "inbatch-dup",
+            targetUrl: "https://example.com/v2",
+          },
+        ],
+      }),
+    });
+
+    expect(importRes.status).toBe(200);
+    const body = (await importRes.json()) as any;
+    expect(body.summary).toEqual({
+      total: 3,
+      created: 1,
+      updated: 2,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(body.createdSlugs).toEqual(["inbatch-dup"]);
+    expect(body.updatedSlugs).toEqual(["merge-me"]);
+
+    const mergedRow = await env.DB.prepare(
+      "SELECT target_url, title, status_code, tags, is_active, forward_query, expires_at FROM links WHERE slug = ?"
+    )
+      .bind("merge-me")
+      .first<{
+        target_url: string;
+        title: string | null;
+        status_code: number;
+        tags: string;
+        is_active: number;
+        forward_query: number;
+        expires_at: string | null;
+      }>();
+
+    expect(mergedRow).toEqual({
+      target_url: "https://example.com/merged-dest",
+      title: "Keep Title",
+      status_code: 301,
+      tags: JSON.stringify(["docs"]),
+      is_active: 0,
+      forward_query: 0,
+      expires_at: "2030-01-01T00:00:00.000Z",
+    });
+
+    const dupRow = await env.DB.prepare(
+      "SELECT target_url, title FROM links WHERE slug = ?"
+    )
+      .bind("inbatch-dup")
+      .first<{ target_url: string; title: string | null }>();
+    expect(dupRow).toEqual({
+      target_url: "https://example.com/v2",
+      title: "V1 Title",
+    });
+  });
+
+  it("handles filtered cursor export cleanly across identical created_at timestamps", async () => {
+    const sharedTs = "2026-06-01T00:00:00.000Z";
+    await SELF.fetch("https://redirect.example.com/api/v1/links/import", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        version: 1,
+        links: [
+          { slug: "tie-1", targetUrl: "https://example.com/1", tags: ["batch-tag"], isActive: true, createdAt: sharedTs },
+          { slug: "tie-2", targetUrl: "https://example.com/2", tags: ["batch-tag"], isActive: true, createdAt: sharedTs },
+          { slug: "tie-3", targetUrl: "https://example.com/3", tags: ["batch-tag"], isActive: true, createdAt: sharedTs },
+          { slug: "tie-inactive", targetUrl: "https://example.com/4", tags: ["batch-tag"], isActive: false, createdAt: sharedTs },
+          { slug: "tie-other", targetUrl: "https://example.com/5", tags: ["other-tag"], isActive: true, createdAt: sharedTs },
+        ],
+      }),
+    });
+
+    const collected: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const params = new URLSearchParams({
+        tag: "batch-tag",
+        isActive: "true",
+        limit: "2",
+      });
+      if (cursor) params.set("cursor", cursor);
+
+      const res = await SELF.fetch(
+        `https://redirect.example.com/api/v1/links/export?${params.toString()}`,
+        { headers: authHeaders() }
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      for (const link of body.links) {
+        collected.push(link.slug);
+      }
+      cursor = body.pagination.hasMore ? body.pagination.nextCursor : null;
+    } while (cursor);
+
+    expect(collected).toHaveLength(3);
+    expect(new Set(collected)).toEqual(new Set(["tie-1", "tie-2", "tie-3"]));
+  });
+
+  it("records db_error for failed write chunks without losing prior committed chunks", async () => {
+    let batchCall = 0;
+    const mockDb = {
+      prepare: () => ({
+        bind: () => ({}),
+      }),
+      batch: async (stmts: unknown[]) => {
+        batchCall++;
+        if (batchCall === 1) {
+          // Prefetch SELECT for existing slugs
+          return stmts.map(() => ({ results: [] }));
+        }
+        if (batchCall === 2) {
+          // First 100-item write chunk succeeds (WRITE_BATCH_CHUNK_SIZE = 100)
+          return stmts.map(() => ({ meta: { changes: 1 } }));
+        }
+        // Second write chunk fails in D1
+        throw new Error("Simulated D1 write error");
+      },
+    } as unknown as D1Database;
+
+    const rawLinks = Array.from({ length: 105 }, (_, i) => ({
+      slug: `batch-item-${i}`,
+      targetUrl: `https://example.com/${i}`,
+    }));
+
+    const res = await importLinksBatch(mockDb, rawLinks, "skip", []);
+    expect(res.summary).toEqual({
+      total: 105,
+      created: 100,
+      updated: 0,
+      skipped: 0,
+      failed: 5,
+    });
+    expect(res.createdSlugs).toHaveLength(100);
+    expect(res.errors).toHaveLength(5);
+    expect(res.errors[0]).toMatchObject({
+      index: 100,
+      slug: "batch-item-100",
+      code: "db_error",
+      message: "Simulated D1 write error",
+    });
+    expect(res.results[104]?.status).toBe("failed");
   });
 });

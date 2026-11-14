@@ -1,13 +1,25 @@
-import type {
-  ApiErrorBody,
-  CreateLinkInput,
-  CreateTokenInput,
-  LinkRecord,
-  LinkStats,
-  ListLinksQuery,
-  Paginated,
-  TokenInfo,
-  UpdateLinkInput,
+import {
+  EXPORT_SCHEMA_VERSION,
+  IMPORT_CLIENT_CHUNK_SIZE,
+  IMPORT_MAX_BATCH_SIZE,
+  type ApiErrorBody,
+  type CreateLinkInput,
+  type CreateTokenInput,
+  type ExportedLink,
+  type ExportLinksQuery,
+  type ImportConflictMode,
+  type ImportItemError,
+  type ImportItemResult,
+  type ImportLinkInput,
+  type ImportLinksRequest,
+  type ImportLinksResponse,
+  type LinkRecord,
+  type LinksExportEnvelope,
+  type LinkStats,
+  type ListLinksQuery,
+  type Paginated,
+  type TokenInfo,
+  type UpdateLinkInput,
 } from "@redirect/shared";
 
 export const AUTH_TOKEN_STORAGE_KEY = "redirect_auth_token";
@@ -260,4 +272,197 @@ export async function rotateInitialToken(): Promise<{
   }>("/api/v1/tokens/initial/rotate", {
     method: "POST",
   });
+}
+
+export async function exportLinksChunk(
+  query: Partial<ExportLinksQuery> = {}
+): Promise<LinksExportEnvelope> {
+  const params = new URLSearchParams();
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.search) params.set("search", query.search);
+  if (query.tag) params.set("tag", query.tag);
+  if (query.isActive !== undefined) params.set("isActive", String(query.isActive));
+
+  const qs = params.toString();
+  return request<LinksExportEnvelope>(`/api/v1/links/export${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+  });
+}
+
+export class ImportChunkError extends Error {
+  readonly partialResponse: ImportLinksResponse;
+  readonly causeError: unknown;
+
+  constructor(
+    message: string,
+    partialResponse: ImportLinksResponse,
+    causeError: unknown
+  ) {
+    super(message);
+    this.name = "ImportChunkError";
+    this.partialResponse = partialResponse;
+    this.causeError = causeError;
+  }
+}
+
+export async function exportAllLinks(options?: {
+  search?: string;
+  tag?: string;
+  isActive?: "true" | "false";
+  limitPerChunk?: number;
+  maxPages?: number;
+  onProgress?: (fetchedCount: number) => void;
+}): Promise<LinksExportEnvelope> {
+  const maxPages = Math.max(1, options?.maxPages ?? 200);
+  const allLinks: ExportedLink[] = [];
+  let cursor: string | undefined = undefined;
+  let hasMore = false;
+
+  for (let page = 0; page < maxPages; page++) {
+    const res = await exportLinksChunk({
+      search: options?.search,
+      tag: options?.tag,
+      isActive: options?.isActive,
+      limit: options?.limitPerChunk,
+      cursor,
+    });
+
+    allLinks.push(...res.links);
+    options?.onProgress?.(allLinks.length);
+
+    if (!res.pagination?.hasMore || !res.pagination.nextCursor) {
+      hasMore = false;
+      break;
+    }
+    hasMore = true;
+    cursor = res.pagination.nextCursor;
+  }
+
+  if (hasMore) {
+    throw new Error(
+      `Export exceeded the maximum page limit (${maxPages} pages, ${allLinks.length} links fetched). Apply filters to export a smaller subset.`
+    );
+  }
+
+  return {
+    version: EXPORT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    count: allLinks.length,
+    links: allLinks,
+  };
+}
+
+export async function importLinksBatch(input: ImportLinksRequest): Promise<ImportLinksResponse> {
+  return request<ImportLinksResponse>("/api/v1/links/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function importLinksChunked(
+  links: ImportLinkInput[],
+  options?: {
+    onConflict?: ImportConflictMode;
+    chunkSize?: number;
+    onProgress?: (processed: number, total: number) => void;
+  }
+): Promise<ImportLinksResponse> {
+  const onConflict: ImportConflictMode = options?.onConflict ?? "skip";
+  if (links.length === 0) {
+    return {
+      version: EXPORT_SCHEMA_VERSION,
+      onConflict,
+      summary: { total: 0, created: 0, updated: 0, skipped: 0, failed: 0 },
+      skippedSlugs: [],
+      createdSlugs: [],
+      updatedSlugs: [],
+      errors: [],
+      results: [],
+    };
+  }
+
+  const chunkSize = Math.max(
+    1,
+    Math.min(options?.chunkSize ?? IMPORT_CLIENT_CHUNK_SIZE, IMPORT_MAX_BATCH_SIZE)
+  );
+
+  const summary = {
+    total: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  const skippedSlugSet = new Set<string>();
+  const createdSlugSet = new Set<string>();
+  const updatedSlugSet = new Set<string>();
+  const errors: ImportItemError[] = [];
+  const results: ImportItemResult[] = [];
+
+  const buildPartialResponse = (): ImportLinksResponse => ({
+    version: EXPORT_SCHEMA_VERSION,
+    onConflict,
+    summary: { ...summary },
+    skippedSlugs: Array.from(skippedSlugSet),
+    createdSlugs: Array.from(createdSlugSet),
+    updatedSlugs: Array.from(updatedSlugSet),
+    errors: [...errors],
+    results: [...results],
+  });
+
+  const totalChunks = Math.ceil(links.length / chunkSize);
+
+  for (let offset = 0; offset < links.length; offset += chunkSize) {
+    const chunk = links.slice(offset, offset + chunkSize);
+    let res: ImportLinksResponse;
+    try {
+      res = await importLinksBatch({
+        version: EXPORT_SCHEMA_VERSION,
+        onConflict,
+        links: chunk,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "Unknown error";
+      const chunkNumber = Math.floor(offset / chunkSize) + 1;
+      throw new ImportChunkError(
+        `Import interrupted at chunk ${chunkNumber}/${totalChunks} (${offset} of ${links.length} links processed): ${reason}`,
+        buildPartialResponse(),
+        err
+      );
+    }
+
+    summary.total += res.summary.total;
+    summary.created += res.summary.created;
+    summary.updated += res.summary.updated;
+    summary.skipped += res.summary.skipped;
+    summary.failed += res.summary.failed;
+
+    for (const s of res.skippedSlugs) skippedSlugSet.add(s);
+    for (const s of res.createdSlugs) createdSlugSet.add(s);
+    for (const s of res.updatedSlugs) {
+      if (!createdSlugSet.has(s)) {
+        updatedSlugSet.add(s);
+      }
+    }
+
+    for (const err of res.errors) {
+      errors.push({
+        ...err,
+        index: err.index + offset,
+      });
+    }
+
+    for (const item of res.results) {
+      results.push({
+        ...item,
+        index: item.index + offset,
+      });
+    }
+
+    options?.onProgress?.(Math.min(offset + chunk.length, links.length), links.length);
+  }
+
+  return buildPartialResponse();
 }

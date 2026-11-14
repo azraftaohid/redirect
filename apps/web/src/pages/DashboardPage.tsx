@@ -3,7 +3,9 @@ import type { LinkRecord, ListLinksQuery } from "@redirect/shared";
 import { listLinks, createLink } from "@/api/client";
 import { LinkRow } from "@/components/LinkRow";
 import { LinkFormModal } from "@/components/LinkFormModal";
+import { ImportLinksModal } from "@/components/ImportLinksModal";
 import { normalizeUrlInput } from "@/utils/url";
+import { exportAndDownloadLinks } from "@/utils/transfer";
 
 const QrCodeModal = React.lazy(() =>
   import("@/components/QrCodeModal").then((m) => ({ default: m.QrCodeModal }))
@@ -18,6 +20,8 @@ import {
   ChevronRight,
   Loader2,
   X,
+  Download,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -60,6 +64,8 @@ export function DashboardPage(): React.ReactElement {
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingLink, setEditingLink] = useState<LinkRecord | null>(null);
   const [qrModalLink, setQrModalLink] = useState<LinkRecord | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Debounce search query so server isn't queried on every keystroke
   useEffect(() => {
@@ -204,6 +210,23 @@ export function DashboardPage(): React.ReactElement {
     setQrModalLink(link);
   }
 
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const envelope = await exportAndDownloadLinks({
+        search: debouncedSearch.trim() || undefined,
+        tag: tag.trim() || undefined,
+        isActive: statusFilter === "active" ? "true" : statusFilter === "inactive" ? "false" : undefined,
+      });
+      toast.success(`Exported ${envelope.count} link(s) to JSON`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to export links");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function handleLinkUpdated(saved: LinkRecord) {
     setLinks((prev) => prev.map((l) => (l.id === saved.id ? saved : l)));
   }
@@ -232,6 +255,9 @@ export function DashboardPage(): React.ReactElement {
   }
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+  const hasActiveFilters = Boolean(
+    debouncedSearch.trim() || tag.trim() || statusFilter !== "all"
+  );
 
   return (
     <div className="space-y-6">
@@ -361,6 +387,42 @@ export function DashboardPage(): React.ReactElement {
               </button>
             </div>
           )}
+
+          {/* Export & Import Actions */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting}
+            className="h-10 px-3 gap-1.5 text-sm"
+            title={
+              hasActiveFilters
+                ? "Export currently filtered links as versioned JSON"
+                : "Export all links as versioned JSON"
+            }
+          >
+            {exporting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            <span>
+              {exporting ? "Exporting..." : hasActiveFilters ? "Export Filtered" : "Export"}
+            </span>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setImportModalOpen(true)}
+            className="h-10 px-3 gap-1.5 text-sm"
+            title="Import links from a JSON export file"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Import</span>
+          </Button>
         </div>
       </div>
 
@@ -456,6 +518,18 @@ export function DashboardPage(): React.ReactElement {
         onClose={() => setFormModalOpen(false)}
         onSuccess={handleLinkSaved}
         initialLink={editingLink}
+      />
+
+      <ImportLinksModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onSuccess={() => {
+          if (page !== 1) {
+            setPage(1);
+          } else {
+            fetchLinks();
+          }
+        }}
       />
 
       {qrModalLink && (
