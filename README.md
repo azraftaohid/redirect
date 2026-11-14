@@ -52,39 +52,26 @@ pnpm install
 
 ### Configure & Provision Cloudflare Resources
 
-`apps/api/wrangler.jsonc` uses Wrangler's **Automatic Resource Provisioning**—`database_id` and KV `id` are intentionally omitted so you don't have to commit account-specific UUIDs.
+`apps/api/wrangler.jsonc` is kept free of account-specific IDs, personal domains, and environment values so you can deploy directly from a public repository and manage deployment settings in the Cloudflare Dashboard (`database_id` and KV `id` are omitted for Automatic Resource Provisioning, `routes` is omitted, and `"keep_vars": true` preserves Dashboard variables).
 
-1. **Configure your domain in `apps/api/wrangler.jsonc`:**
+1. **Deploy & auto-provision resources (or pre-create them first):**
 
-   Update `routes` with your custom domain (keep `d1_databases` and `kv_namespaces` as-is unless you want to pin explicit IDs):
+   - **Via Cloudflare Workers Builds (Git integration):**
+     - **Root directory:** `/`
+     - **Build command:** `pnpm run build`
+     - **Deploy command:** `pnpm --filter @redirect/api run deploy`
+     - **Preview Builds:** Disabled (`workers_dev: false` and `preview_urls: false` are set in `apps/api/wrangler.jsonc`)
+     - **API token (Advanced settings):** Use a **user-scoped** API token with the **Edit Cloudflare Workers** permissions plus **Account → D1 → Edit** (Cloudflare's default auto-generated Workers Builds token lacks D1 permissions).
 
-   ```jsonc
-   "routes": [
-     { "pattern": "go.yourdomain.com", "custom_domain": true }
-   ],
-   "d1_databases": [
-     {
-       "binding": "DB",
-       "database_name": "redirect-prod",
-       "migrations_dir": "migrations"
-     }
-   ],
-   "kv_namespaces": [
-     {
-       "binding": "AUTH_TOKENS"
-     }
-   ]
-   ```
-
-2. **Deploy & auto-provision resources (or pre-create them first):**
-
-   - **Automatic (simplest):** Run `pnpm deploy` directly. Wrangler will automatically create the `redirect-prod` D1 database and `redirect-auth-tokens` KV namespace on your account, bind them, and deploy the Worker:
+   - **Or from your local CLI:** Authenticate Wrangler (`pnpm --filter @redirect/api exec wrangler login`, or add `--device` in headless/container environments), then build and deploy:
 
      ```bash
-     pnpm deploy
+     pnpm run build && pnpm --filter @redirect/api run deploy
      ```
 
-     > **Note:** Interactive `wrangler deploy` writes the provisioned IDs back into `apps/api/wrangler.jsonc`. You can keep them or discard those config changes—subsequent deploys will continue resolving `redirect-prod` by name and inheriting `AUTH_TOKENS`.
+     Wrangler will automatically create the `redirect-prod` D1 database and `redirect-auth-tokens` KV namespace on your account, bind them, and deploy the Worker.
+
+     > **Note:** Interactive local `wrangler deploy` writes the provisioned IDs back into `apps/api/wrangler.jsonc`; discard that diff (`git checkout -- apps/api/wrangler.jsonc`) if you don't want IDs committed. In Workers Builds CI, writeback is skipped automatically.
 
    - **Pre-created / Dashboard-bound (zero-downtime migrations):** If you prefer to migrate D1 before the first deploy or bind an existing KV namespace via the Dashboard:
 
@@ -97,9 +84,14 @@ pnpm install
      pnpm --filter @redirect/api exec wrangler kv namespace create AUTH_TOKENS
      ```
 
+2. **Configure your domain & variables in the Cloudflare Dashboard:**
+
+   - **Custom Domain:** Go to **Workers & Pages → `redirect` → Settings → Domains & Routes** and add your short domain (e.g., `go.yourdomain.com`).
+   - **Environment Variables (optional):** Go to **Settings → Variables and Secrets** to set `FALLBACK_URL`, `OWN_HOSTNAMES`, `ANALYTICS_ENABLED`, or `ANALYTICS_DIMENSIONS` (`keep_vars: true` preserves them across deploys).
+
 3. **Apply database migrations:**
 
-   - For remote production (if not already run before deploy):
+   - For remote production (run `pnpm --filter @redirect/api exec wrangler login` first if not authenticated):
 
      ```bash
      pnpm db:migrate:remote
@@ -246,7 +238,7 @@ Cloudflare D1 bills by **rows written** (Free tier: 100,000 writes/day; Paid Wor
 
 ### Enabling Optional Dimensions
 
-In `apps/api/wrangler.jsonc` (or via Cloudflare Dashboard environment variables):
+Configure via Cloudflare Dashboard (**Settings → Variables and Secrets**), `apps/api/.dev.vars` locally, or `vars` in `apps/api/wrangler.jsonc`:
 
 ```jsonc
 "vars": {
