@@ -1,8 +1,15 @@
 # Redirect
 
-A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers.
+A simple, lightweight, cost-aware URL redirection and link management service built for Cloudflare Workers (`v0.2.0` — see [CHANGELOG.md](CHANGELOG.md)).
 
 Designed as a single Cloudflare Worker with Static Assets, Redirect handles public link redirection with sub-second response times, provides a token-authenticated management API, and features a frontend management application served under `/app/`.
+
+### Key Features
+
+- **Edge Redirection Engine:** Case-sensitive, mutable single-segment slugs (`^[A-Za-z0-9_-]{1,64}$`), temporary/permanent redirect status codes (`301`, `302`, `303`, `307`, `308`), optional expiration timestamps, query parameter forwarding, and loop prevention against `OWN_HOSTNAMES`.
+- **Management Web Console (`/app/`):** Dashboard for shortening, searching, filtering by tag/status, generating QR codes, viewing daily/country/referrer click analytics, importing/exporting links as versioned JSON, managing API tokens, and sharing URLs via PWA Web Share Target (`/app/share`).
+- **Token-Authenticated REST API (`/api/v1/*`):** Full CRUD for links, analytics stats, token lifecycle management, cursor-paginated JSON export, and chunk-friendly batch JSON import.
+- **Cost-Aware Analytics & Backups:** Daily D1 rollup aggregates (`link_daily_clicks`, optional `link_daily_dims`) with non-blocking `ctx.waitUntil()` writes, plus D1 SQLite export/Time Travel and portable links-only JSON export/import.
 
 ---
 
@@ -306,6 +313,9 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backu
 ## 8. Development & Testing
 
 ```bash
+# Build all packages and assets
+pnpm build
+
 # Run TypeScript typechecks
 pnpm typecheck
 
@@ -315,3 +325,17 @@ pnpm test
 # Run local development server
 pnpm dev
 ```
+
+### API Endpoints Reference
+
+All `/api/v1/*` endpoints require a valid bearer token (`Authorization: Bearer <token>` or `X-API-Key: <token>`):
+
+- **Links & Transfer:** `GET /api/v1/links`, `POST /api/v1/links`, `GET /api/v1/links/export`, `POST /api/v1/links/import`, `GET /api/v1/links/:id`, `PATCH /api/v1/links/:id`, `DELETE /api/v1/links/:id`
+- **Analytics:** `GET /api/v1/links/:id/stats`
+- **Auth & Tokens:** `GET /api/v1/auth/verify`, `GET /api/v1/tokens`, `POST /api/v1/tokens`, `DELETE /api/v1/tokens/:id`, `POST /api/v1/tokens/initial/rotate`
+
+---
+
+## 9. Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history and notable changes.
