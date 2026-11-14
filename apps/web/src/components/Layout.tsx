@@ -10,6 +10,7 @@ import {
   LogOut,
   ShieldCheck,
 } from "lucide-react";
+import { AppLogo } from "@/components/AppLogo";
 import { cn } from "@/lib/utils";
 
 interface LayoutProps {
@@ -69,9 +70,7 @@ export function Layout({ children }: LayoutProps): React.ReactElement {
           {/* Logo & Desktop Nav */}
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2 font-bold text-base tracking-tight hover:opacity-85 transition-opacity">
-              <div className="w-7 h-7 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center">
-                <Link2 className="w-4 h-4" />
-              </div>
+              <AppLogo className="w-7 h-7" />
               <span>Redirect</span>
             </Link>
 

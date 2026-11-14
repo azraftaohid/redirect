@@ -8,6 +8,7 @@ import { AuthGate } from "../src/components/AuthGate";
 import { AccessExpiredBanner } from "../src/components/AccessExpiredBanner";
 import { DailyChart } from "../src/components/DailyChart";
 import { Layout } from "../src/components/Layout";
+import { AppLogo } from "../src/components/AppLogo";
 
 describe("UI Components", () => {
   it("renders Button with custom label and click handler", () => {
@@ -204,5 +205,46 @@ describe("DailyChart & Layout Navigation", () => {
       left: 0,
       behavior: "instant",
     });
+  });
+
+  it("renders AppLogo squircle with /> glyph and uses it in Layout and AuthGate", async () => {
+    const { container: logoContainer } = render(<AppLogo className="w-8 h-8" />);
+    const logoSvg = logoContainer.querySelector("svg");
+    expect(logoSvg).toBeInTheDocument();
+    expect(logoSvg?.getAttribute("viewBox")).toBe("0 0 100 100");
+    expect(logoSvg?.getAttribute("aria-hidden")).toBe("true");
+    expect(logoSvg).toHaveClass("w-8", "h-8");
+    expect(logoSvg?.querySelector("rect")?.getAttribute("rx")).toBe("24");
+    expect(logoSvg?.querySelectorAll("path").length).toBe(2);
+
+    const { container: layoutContainer } = render(
+      <AuthProvider>
+        <Layout>
+          <div>Page Content</div>
+        </Layout>
+      </AuthProvider>
+    );
+    const brandLink = layoutContainer.querySelector("header a");
+    const brandLogo = brandLink?.querySelector("svg");
+    expect(brandLogo).toBeInTheDocument();
+    expect(brandLogo?.getAttribute("viewBox")).toBe("0 0 100 100");
+    expect(brandLogo).toHaveClass("w-7", "h-7");
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: new Headers(),
+    } as any);
+    const { container: authContainer } = render(
+      <AuthProvider>
+        <AuthGate>
+          <div>Protected Content</div>
+        </AuthGate>
+      </AuthProvider>
+    );
+    await screen.findByPlaceholderText(/paste your token here/i);
+    const authLogo = authContainer.querySelector('svg[viewBox="0 0 100 100"]');
+    expect(authLogo).toBeInTheDocument();
+    expect(authLogo).toHaveClass("w-12", "h-12");
   });
 });

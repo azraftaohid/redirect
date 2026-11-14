@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-11-14
+
+### Changed
+
+- Updated the Redirect brand mark to a squircle `/>` logo across the navigation header (`Layout`), token unlock screen (`AuthGate`), theme-aware SVG favicons (`icon-192.svg`, `icon-512.svg`), and PWA/Apple PNG icons (`icon-192.png`, `icon-512.png`, `icon-512-maskable.png`, `apple-touch-icon.png`).
+
 ## [0.2.2] - 2026-11-14
 
 ### Changed

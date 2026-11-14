@@ -1,4 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="100" fill="#2563eb" />
-  <path d="M192 320 L320 192 M320 192 H224 M320 192 V288" stroke="#ffffff" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512" fill="none">
+  <style>
+    .bg { fill: #18181b; }
+    .fg { stroke: #fafafa; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #f4f4f5; }
+      .fg { stroke: #09090b; }
+    }
+  </style>
+  <rect width="100" height="100" rx="24" class="bg" />
+  <path d="M43.5 24L26.5 76" class="fg" stroke-width="8.7" stroke-linecap="round" />
+  <path d="M55.5 34L74.5 50L55.5 66" class="fg" stroke-width="8.7" stroke-linecap="round" stroke-linejoin="round" />
 </svg>

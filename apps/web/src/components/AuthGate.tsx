@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { AppLogo } from "@/components/AppLogo";
 import {
-  KeyRound,
   Eye,
   EyeOff,
   HelpCircle,
@@ -74,9 +74,7 @@ export function AuthGate({ children }: { children: React.ReactNode }): React.Rea
       <div className="w-full max-w-md">
         {/* Header / Brand */}
         <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center shadow-md mb-3">
-            <KeyRound className="w-6 h-6" />
-          </div>
+          <AppLogo className="w-12 h-12 mb-3 drop-shadow-md" />
           <h1 className="text-2xl font-bold tracking-tight">Redirect</h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
             Enter your token to access the dashboard
