@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security & Changed
+
+- **Rate Limiting & Analytics Controls:** Tuned `API_LIMITER` (`120 req / 60s` per normalized IP or IPv6 `/64` prefix) and `CLICK_LIMITER` (`10 req / 60s` per normalized IP or IPv6 `/64` prefix), moved click rate-limiting inside `ctx.waitUntil` gated by countable clicks and enabled analytics, and made `ANALYTICS_ENABLED` accept case-insensitive `"false"`, `"0"`, `"off"`, and `"no"`.
+- **Token Management Hardening:** Replaced wildcard middleware on `/api/v1/tokens*` with explicit per-route `requireTokenAdmin` middleware + `auth.forbidden` audit logging, blocked `POST /api/v1/tokens` with `409 mechanism_disabled` during strict `API_KEY` lockdown, removed unreachable handler checks, and bounded `DELETE /api/v1/tokens` (`limit: 100`, max 5 pages / 500 keys per call, 25-key parallel delete batches) returning `{ deleted: true, count, truncated }` with a Settings UI warning when truncated.
+- **URL Validation & Security Headers:** Shared `UNSAFE_URL_CHARS_REGEX` (`/[\u0000-\u0020\u007F-\u009F\u2028\u2029]/`) across `@redirect/shared` (`validation.ts` and `schemas.ts`), applied `validateTargetUrl` in `DashboardPage` and `ShareTargetPage`, trimmed `FALLBACK_URL` before validation, added `Content-Security-Policy` to 404 responses (`renderNotFound`), added `X-Frame-Options: DENY` on static asset fallbacks, added `Referrer-Policy: no-referrer` to 405 responses, and unified post-dispatch `/api/v1/*` principal enforcement in `apiApp`.
+- **Audit Logs, Dev Hosts & Overrides:** Hardened `logAuditEvent` against envelope field overwrites and enriched `link.import`, `link.update`, `link.delete`, and `token.revoke_all` metadata; removed hardcoded internal hostnames from `apps/web/vite.config.ts` in favor of `ALLOWED_HOSTS` / `VITE_ALLOWED_HOSTS` via `loadEnv`; scoped `zod` override in `pnpm-workspace.yaml` to `zod@<4.6.7`.
+
 ## [0.2.3] - 2026-11-14
 
 ### Changed
@@ -32,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Links JSON Import & Export:**
-  - `GET /api/v1/links/export` cursor-paginated endpoint supporting `limit` (default `200`, max `500`), `search`, `tag`, and `isActive` filters, exporting portable versioned JSON (`version: 1`) without click analytics or API tokens.
+  - `GET /api/v1/links/export` cursor-paginated endpoint supporting `limit` (default `500`, max `1000`), `search`, `tag`, and `isActive` filters, exporting portable versioned JSON (`version: 1`) without click analytics or API tokens.
   - `POST /api/v1/links/import` batch endpoint (up to `500` items per request) with configurable conflict modes (`"skip"` default or `"overwrite"`), per-item result tracking (`created`, `updated`, `skipped`, `failed`), explicit `skippedSlugs`/`createdSlugs`/`updatedSlugs`, auto-generated 6-character slugs when omitted, timezone offset normalization (`+HH:MM`/`Z`), merge-only overwrite semantics for omitted optional fields, and per-chunk database error recovery (`db_error`).
   - Frontend chunked transfer helpers (`exportAllLinks` with `maxPages` overflow guard, `importLinksChunked` with `200`-item chunks and `ImportChunkError` partial progress preservation), Dashboard filtered/full Export and Import triggers, **Settings → Data Portability** controls, and `ImportLinksModal` with per-reason skip annotations (`slug_exists` vs `duplicate_in_batch`) and partial-failure reporting.
 - **Management Web Console (`/app/`):**

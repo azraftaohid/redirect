@@ -1051,7 +1051,7 @@ describe("Links API (/api/v1/links) & Stats (/api/v1/links/:id/stats)", () => {
       index: 100,
       slug: "batch-item-100",
       code: "db_error",
-      message: "Simulated D1 write error",
+      message: "Database write failed for this chunk.",
     });
     expect(res.results[104]?.status).toBe("failed");
   });

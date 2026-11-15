@@ -151,8 +151,30 @@ describe("Request Dispatcher & App Serving", () => {
     const res = await fetchWorker("https://redirect.example.com/unknown-dead-link");
     expect(res.status).toBe(404);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("Content-Security-Policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    );
     const body = await res.text();
     expect(body).toContain("404 Not Found");
     expect(body).not.toContain("/app");
+  });
+
+  it("sets COOP and Permissions-Policy on /app/ and nosniff/no-referrer on /app 308 redirect", async () => {
+    const resApp = await fetchWorker("https://redirect.example.com/app/");
+    expect(resApp.status).toBe(200);
+    expect(resApp.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
+    expect(resApp.headers.get("Permissions-Policy")).toBe(
+      "camera=(), microphone=(), geolocation=()"
+    );
+
+    const resRedirect = await fetchWorker("https://redirect.example.com/app", {
+      redirect: "manual",
+    });
+    expect(resRedirect.status).toBe(308);
+    expect(resRedirect.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(resRedirect.headers.get("Referrer-Policy")).toBe("no-referrer");
   });
 });

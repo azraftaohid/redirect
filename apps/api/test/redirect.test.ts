@@ -308,4 +308,50 @@ describe("Redirect Engine (/:slug)", () => {
 
     prepareSpy.mockRestore();
   });
+
+  it("handles legacy D1 rows containing control characters safely without throwing 500", async () => {
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO links (id, slug, target_url, status_code, forward_query, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind("legacy-crlf-id", "bad-crlf", "https://example.com/a\r\nb", 307, 1, 1, now, now)
+      .run();
+
+    const res = await fetchWorker("https://redirect.example.com/bad-crlf", {
+      redirect: "manual",
+    });
+    expect(res.status).toBe(404);
+
+    const row = await env.DB.prepare("SELECT click_count FROM links WHERE id = ?")
+      .bind("legacy-crlf-id")
+      .first<{ click_count: number }>();
+    expect(row?.click_count).toBe(0);
+  });
+
+  it("ignores FALLBACK_URL containing control characters and returns 404 safely", async () => {
+    const res = await fetchWorker(
+      "https://redirect.example.com/nonexistent-slug",
+      { redirect: "manual" },
+      { FALLBACK_URL: "https://fallback.example.com/path\r\nInjected: 1" }
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("trims whitespace around FALLBACK_URL and treats whitespace-only as unset", async () => {
+    const resPadded = await fetchWorker(
+      "https://redirect.example.com/nonexistent-slug",
+      { redirect: "manual" },
+      { FALLBACK_URL: "  https://fallback.example.org/home  " }
+    );
+    expect(resPadded.status).toBe(307);
+    expect(resPadded.headers.get("Location")).toBe("https://fallback.example.org/home");
+
+    const resBlank = await fetchWorker(
+      "https://redirect.example.com/nonexistent-slug",
+      { redirect: "manual" },
+      { FALLBACK_URL: "   \t " }
+    );
+    expect(resBlank.status).toBe(404);
+  });
 });

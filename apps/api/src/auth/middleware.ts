@@ -1,9 +1,43 @@
 import type { MiddlewareHandler } from "hono";
 import type { AppContext } from "../types.js";
 import { formatErrorResponse } from "../errors.js";
+import { normalizeIpBucket } from "../utils/analytics.js";
 import { authenticate, ensureInitialToken, extractToken } from "./tokens.js";
 
+function rateLimitedResponse(c: Parameters<MiddlewareHandler<AppContext>>[0]) {
+  const { status, body } = formatErrorResponse(
+    429,
+    "rate_limited",
+    "Too many API requests. Please try again later."
+  );
+  return c.json(body, status, {
+    "Retry-After": "60",
+    "Cache-Control": "no-store",
+  });
+}
+
+async function checkApiRateLimit(
+  limiter: RateLimit | undefined,
+  key: string
+): Promise<boolean> {
+  if (!limiter) {
+    return true;
+  }
+  try {
+    const { success } = await limiter.limit({ key });
+    return success;
+  } catch (err) {
+    console.error("API rate limiter failed:", err);
+    return true;
+  }
+}
+
 export const authMiddleware: MiddlewareHandler<AppContext> = async (c, next) => {
+  const cfIp = c.req.header("cf-connecting-ip")?.trim();
+  if (cfIp && !(await checkApiRateLimit(c.env.API_LIMITER, `api:${normalizeIpBucket(cfIp)}`))) {
+    return rateLimitedResponse(c);
+  }
+
   const token = extractToken(c.req.raw);
 
   if (token && token.length <= 512) {

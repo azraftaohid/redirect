@@ -84,12 +84,17 @@ export function extractToken(request: Request): string | null {
   return null;
 }
 
+export function isInitialTokenDisabled(env: Env): boolean {
+  return env.INITIAL_TOKEN?.trim().toLowerCase() === "disabled";
+}
+
 export async function authenticate(env: Env, token: string): Promise<Principal | null> {
-  // 1. env.API_KEY set and matches token (checked before any format validation)
+  // 1. env.API_KEY set -> strict lockdown: only env.API_KEY is accepted (initial and custom tokens disabled)
   if (env.API_KEY && env.API_KEY.trim().length > 0) {
     if (await safeEqual(token, env.API_KEY.trim())) {
       return { kind: "env", id: "env", name: "Environment API key" };
     }
+    return null;
   }
 
   // 2. Validate token format
@@ -102,9 +107,9 @@ export async function authenticate(env: Env, token: string): Promise<Principal |
     return null;
   }
 
-  // 3. Initial token check (only when API_KEY is unset)
+  // 3. Initial token check (only when API_KEY is unset and INITIAL_TOKEN is not disabled)
   if (parsed.id === INITIAL_TOKEN_ID) {
-    if (env.API_KEY && env.API_KEY.trim().length > 0) {
+    if (isInitialTokenDisabled(env)) {
       return null;
     }
     const initialToken = await env.AUTH_TOKENS.get("initial_token");
@@ -137,8 +142,8 @@ export async function authenticate(env: Env, token: string): Promise<Principal |
 }
 
 export async function ensureInitialToken(env: Env): Promise<string | null> {
-  if (env.API_KEY && env.API_KEY.trim().length > 0) {
-    return null; // env.API_KEY takes precedence, initial_token mechanism disabled
+  if ((env.API_KEY && env.API_KEY.trim().length > 0) || isInitialTokenDisabled(env)) {
+    return null; // env.API_KEY or INITIAL_TOKEN=disabled disables initial_token mechanism
   }
 
   if (!env.AUTH_TOKENS) {
@@ -170,6 +175,9 @@ export async function ensureInitialToken(env: Env): Promise<string | null> {
 export async function rotateInitialToken(env: Env): Promise<string> {
   if (env.API_KEY && env.API_KEY.trim().length > 0) {
     throw new Error("Cannot rotate initial token when API_KEY is set.");
+  }
+  if (isInitialTokenDisabled(env)) {
+    throw new Error("Cannot rotate initial token when INITIAL_TOKEN is disabled.");
   }
 
   const token = generateToken(INITIAL_TOKEN_ID);

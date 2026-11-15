@@ -118,9 +118,10 @@ export function QrCodeModal({
             {loading ? (
               <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
             ) : svgContent ? (
-              <div
-                className="w-full h-full [&>svg]:w-full [&>svg]:h-full"
-                dangerouslySetInnerHTML={{ __html: svgContent }}
+              <img
+                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`}
+                alt={`QR code for /${slug}`}
+                className="w-full h-full object-contain"
               />
             ) : (
               <span className="text-xs text-zinc-400">Unable to render preview</span>

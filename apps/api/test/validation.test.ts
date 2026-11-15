@@ -106,4 +106,27 @@ describe("Schemas", () => {
     });
     expect(res.title).toBeNull();
   });
+
+  it("rejects ASCII control characters and whitespace in validateTargetUrl and link schemas", () => {
+    const internalBadUrls = [
+      "https://example.com/\r\nSet-Cookie: a=b",
+      "https://example.com/\nnext",
+      "https://example.com/\tpath",
+      "https://example.com/\0null",
+      "https://example.com/has space",
+      "https://example.com/\x7fdel",
+      "https://example.com/\u0085nel",
+      "https://example.com/\u2028ls",
+      "https://example.com/\u2029ps",
+    ];
+
+    for (const url of internalBadUrls) {
+      expect(validateTargetUrl(url, []).ok).toBe(false);
+      expect(() => createLinkSchema.parse({ targetUrl: url })).toThrow();
+      expect(() => updateLinkSchema.parse({ targetUrl: url })).toThrow();
+    }
+
+    // Trailing newline is rejected directly by validateTargetUrl (and stripped by schema .trim())
+    expect(validateTargetUrl("https://example.com/\n", []).ok).toBe(false);
+  });
 });

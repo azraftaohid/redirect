@@ -256,6 +256,16 @@ export async function deleteToken(id: string): Promise<{ deleted: true; id: stri
   });
 }
 
+export async function revokeAllTokens(): Promise<{
+  deleted: true;
+  count: number;
+  truncated: boolean;
+}> {
+  return request<{ deleted: true; count: number; truncated: boolean }>("/api/v1/tokens", {
+    method: "DELETE",
+  });
+}
+
 export async function rotateInitialToken(): Promise<{
   token: string;
   id: "initial";

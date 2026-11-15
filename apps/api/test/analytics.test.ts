@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import worker from "../src/index.js";
-import { recordClick, normalizeReferrer, parseEnabledDimensions } from "../src/utils/analytics.js";
+import {
+  recordClick,
+  normalizeReferrer,
+  parseEnabledDimensions,
+  normalizeIpBucket,
+  isAnalyticsDisabled,
+} from "../src/utils/analytics.js";
 import type { Env } from "../src/types.js";
 
 async function fetchWorker(
@@ -293,5 +299,76 @@ describe("Analytics & Click Recording", () => {
     expect(stats.dimensions.country).toBeDefined();
     expect(stats.dimensions.country).toEqual([{ value: "XX", clicks: 1 }]);
     expect(stats.dimensions.referrer).toBeUndefined();
+  });
+
+  it("still redirects with Location intact but skips click recording when CLICK_LIMITER triggers", async () => {
+    const limitMock = vi.fn().mockResolvedValue({ success: false });
+    const limitedEnv: Partial<Env> = {
+      CLICK_LIMITER: { limit: limitMock },
+    };
+
+    const res = await fetchWorker(
+      `https://redirect.example.com/${testLinkSlug}`,
+      {
+        redirect: "manual",
+        headers: {
+          "cf-connecting-ip": "203.0.113.42",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        },
+      },
+      limitedEnv
+    );
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("Location")).toBe("https://example.com/analytics-dest");
+    expect(limitMock).toHaveBeenCalledWith({ key: "click:203.0.113.42" });
+
+    const linkRow = await env.DB.prepare("SELECT click_count FROM links WHERE id = ?")
+      .bind(testLinkId)
+      .first<{ click_count: number }>();
+    expect(linkRow?.click_count).toBe(0);
+  });
+
+  it("normalizes IPv4 and IPv6 addresses into rate-limit buckets", () => {
+    expect(normalizeIpBucket("203.0.113.42")).toBe("203.0.113.42");
+    expect(normalizeIpBucket(" 198.51.100.7 ")).toBe("198.51.100.7");
+
+    const v6A = normalizeIpBucket("2001:0db8:85a3:0000:1111:2222:3333:4444");
+    const v6B = normalizeIpBucket("2001:db8:85a3:0:aaaa:bbbb:cccc:dddd");
+    const v6OtherSubnet = normalizeIpBucket("2001:db8:85a3:1::1");
+    expect(v6A).toBe(v6B);
+    expect(v6A).toMatch(/^2001:.*\/64$/);
+    expect(v6A).not.toBe(v6OtherSubnet);
+  });
+
+  it("treats ANALYTICS_ENABLED disable values case-insensitively ('FALSE', 'off', 'no', '0')", async () => {
+    expect(isAnalyticsDisabled({ ...env, ANALYTICS_ENABLED: "FALSE" })).toBe(true);
+    expect(isAnalyticsDisabled({ ...env, ANALYTICS_ENABLED: " Off " })).toBe(true);
+    expect(isAnalyticsDisabled({ ...env, ANALYTICS_ENABLED: "NO" })).toBe(true);
+    expect(isAnalyticsDisabled({ ...env, ANALYTICS_ENABLED: "0" })).toBe(true);
+    expect(isAnalyticsDisabled({ ...env, ANALYTICS_ENABLED: "true" })).toBe(false);
+    expect(isAnalyticsDisabled(env)).toBe(false);
+
+    const limitMock = vi.fn().mockResolvedValue({ success: true });
+    for (const disabledVal of ["FALSE", "Off", "no", "0"]) {
+      const res = await fetchWorker(
+        `https://redirect.example.com/${testLinkSlug}`,
+        {
+          redirect: "manual",
+          headers: {
+            "cf-connecting-ip": "203.0.113.42",
+            "User-Agent": "Mozilla/5.0 Chrome",
+          },
+        },
+        { ANALYTICS_ENABLED: disabledVal, CLICK_LIMITER: { limit: limitMock } }
+      );
+      expect(res.status).toBe(307);
+    }
+    expect(limitMock).not.toHaveBeenCalled();
+
+    const linkRow = await env.DB.prepare("SELECT click_count FROM links WHERE id = ?")
+      .bind(testLinkId)
+      .first<{ click_count: number }>();
+    expect(linkRow?.click_count).toBe(0);
   });
 });

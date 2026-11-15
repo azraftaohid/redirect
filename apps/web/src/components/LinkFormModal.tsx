@@ -384,7 +384,9 @@ export function LinkFormModal({
                 <Label htmlFor="link-forward-query" className="text-sm font-medium cursor-pointer">
                   Forward Query Params
                 </Label>
-                <p className="text-xs text-zinc-500">Append UTM and incoming query params</p>
+                <p className="text-xs text-zinc-500">
+                  Append UTM and unshadowed query params (disable if destination trusts redirect/callback params)
+                </p>
               </div>
               <Switch
                 id="link-forward-query"

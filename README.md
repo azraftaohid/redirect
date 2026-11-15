@@ -6,7 +6,7 @@ Designed as a single Cloudflare Worker with Static Assets, Redirect handles publ
 
 ### Key Features
 
-- **Edge Redirection Engine:** Case-sensitive, mutable single-segment slugs (`^[A-Za-z0-9_-]{1,64}$`), temporary/permanent redirect status codes (`301`, `302`, `303`, `307`, `308`), optional expiration timestamps, query parameter forwarding, and loop prevention against `OWN_HOSTNAMES`.
+- **Edge Redirection Engine:** Case-sensitive, mutable single-segment slugs (`^[A-Za-z0-9_-]{1,64}$`), temporary/permanent redirect status codes (`301`, `302`, `307`, `308`), optional expiration timestamps, query parameter forwarding, and loop prevention against `OWN_HOSTNAMES`.
 - **Management Web Console (`/app/`):** Dashboard for shortening, searching, filtering by tag/status, generating QR codes, viewing daily/country/referrer click analytics, importing/exporting links as versioned JSON, managing API tokens, and sharing URLs via PWA Web Share Target (`/app/share`).
 - **Token-Authenticated REST API (`/api/v1/*`):** Full CRUD for links, analytics stats, token lifecycle management, cursor-paginated JSON export, and chunk-friendly batch JSON import.
 - **Cost-Aware Analytics & Backups:** Daily D1 rollup aggregates (`link_daily_clicks`, optional `link_daily_dims`) with non-blocking `ctx.waitUntil()` writes, plus D1 SQLite export/Time Travel and portable links-only JSON export/import.
@@ -30,7 +30,7 @@ Every incoming request is dispatched by the Worker (`run_worker_first: true`) ac
 - **Reserved top-level paths:** Only `api` and `app` are reserved (case-insensitive).
 - **Slug format:** Single-segment `^[A-Za-z0-9_-]{1,64}$` (case-sensitive and mutable).
 - **Loop prevention:** Targets cannot redirect to the redirector host or configured `OWN_HOSTNAMES`.
-- **Query preservation:** Incoming query parameters are merged while preserving target parameters and encoding byte-for-byte.
+- **Query preservation:** Incoming query parameters are merged while preserving target parameters (target parameters cannot be shadowed) and encoding byte-for-byte. Note: `forwardQuery` defaults to `true`; disable it per link if the destination treats arbitrary query parameters (e.g., `next` or `redirect_uri`) specially.
 
 ---
 
@@ -87,7 +87,10 @@ pnpm install
 2. **Configure your domain & variables in the Cloudflare Dashboard:**
 
    - **Custom Domain:** Go to **Workers & Pages → `redirect` → Settings → Domains & Routes** and add your short domain (e.g., `go.yourdomain.com`).
-   - **Environment Variables (optional):** Go to **Settings → Variables and Secrets** to set `FALLBACK_URL`, `OWN_HOSTNAMES`, `ANALYTICS_ENABLED`, or `ANALYTICS_DIMENSIONS` (`keep_vars: true` preserves them across deploys).
+   - **Recommended SSL/TLS Settings:** Under **SSL/TLS → Edge Certificates** for your zone, enable **Always Use HTTPS** and **HTTP Strict Transport Security (HSTS)** so all dashboard sessions and redirect requests are upgraded cleanly over HTTPS.
+   - **Environment Variables (optional):** Go to **Settings → Variables and Secrets** to set `FALLBACK_URL`, `OWN_HOSTNAMES`, `INITIAL_TOKEN`, `ANALYTICS_ENABLED`, or `ANALYTICS_DIMENSIONS` (`keep_vars: true` preserves them across deploys):
+     - `OWN_HOSTNAMES`: Comma-separated list of additional hostnames pointing to this Worker (e.g. `www.go.example.com,redirect.yourname.workers.dev`) so loop prevention blocks redirects back to any alias or custom domain.
+     - `INITIAL_TOKEN`: Set to `"disabled"` (case-insensitive) to disable automatic `initial_token` bootstrap and reject `initial_token` auth. Already-provisioned custom `token:*` tokens continue managing links and analytics, while `/api/v1/tokens*` token management is frozen until re-enabled (or managed/revoked with `API_KEY`).
 
 3. **Apply database migrations:**
 
@@ -117,7 +120,7 @@ Redirect employs a zero-lockout lazy bootstrapping mechanism for API authenticat
    curl -i https://<your-domain>/api/v1/auth/verify
    ```
 
-   The API will respond with `401 Unauthorized`. This initial request triggers the Worker to automatically generate a secure token in the format `rdir_initial_<secret>` (48-character Base62 secret) and store it in KV under the key `initial_token`.
+   The API will respond with `401 Unauthorized`. This initial request triggers the Worker to automatically generate a secure token in the format `rdir_initial_<secret>` (32-character Base62 secret) and store it in KV under the key `initial_token`.
 
 2. **Retrieve the token in production:**
 
@@ -131,11 +134,13 @@ Redirect employs a zero-lockout lazy bootstrapping mechanism for API authenticat
    pnpm --filter @redirect/api exec wrangler kv key get initial_token --binding AUTH_TOKENS --local
    ```
 
-### Token Storage Layout in KV
+### Token Storage Layout & Privileges
 
 For transparent operator visibility, tokens are stored in Workers KV (`AUTH_TOKENS`) using a self-indexing layout:
-- `initial_token`: Plaintext value `rdir_initial_<secret>`.
+- `initial_token`: Plaintext value `rdir_initial_<secret>` (32-char Base62 secret).
 - `token:<id>`: Plaintext value `rdir_<id>_<secret>` (where `<id>` is 10 chars Base62 and `<secret>` is 32 chars Base62). Token metadata (`{ name, createdAt, expiresAt, preview }`) is stored in the KV metadata header, enabling fast direct lookups, instant 1-op revocations without listing, and efficient prefix enumeration.
+- **Privilege Separation:** Only sessions authenticated with `initial_token` or master `API_KEY` can list, create, rotate, or revoke API tokens (`/api/v1/tokens`, `/api/v1/tokens/*`). Custom `token:<id>` tokens can manage links and view analytics, and receive `403 Forbidden` on token management routes. While `API_KEY` is configured (strict lockdown), creating custom tokens and rotating `initial_token` are disabled (`409 mechanism_disabled`), while listing and revoking leftover KV tokens remain active.
+- **Lifecycle Hygiene:** Because `initial_token` never expires automatically, create expiring custom tokens *first* for day-to-day CLI/automation usage before setting `INITIAL_TOKEN=disabled` or enforcing `API_KEY` lockdown.
 
 ### Authenticating API Calls
 
@@ -151,32 +156,63 @@ curl -H "X-API-Key: <your-token>" https://<your-domain>/api/v1/auth/verify
 
 ---
 
-## 3. Recovery & Lockout Prevention
+## 3. Recovery, Security Controls & Incident Response
 
 The system is designed so that the owner can **never be locked out**:
 
 1. **Regenerating Initial Token:**
 
-   If you ever lose your tokens or revoke all keys, delete the `initial_token` key directly in the Cloudflare Dashboard (or via Wrangler KV). The very next unauthenticated API request will detect the absence and generate a brand-new `initial_token`.
+   If you ever lose your tokens or revoke all keys, delete the `initial_token` key directly in the Cloudflare Dashboard (or via Wrangler KV). The very next unauthenticated `/api/v1/auth/verify` request will detect the absence and generate a brand-new `initial_token` (unless `API_KEY` is set or `INITIAL_TOKEN=disabled`).
 
 2. **Rotating Initial Token:**
 
-   Call the rotation endpoint with your existing token:
+   Call the rotation endpoint with `initial_token` (returns `409 mechanism_disabled` if `API_KEY` is set or `INITIAL_TOKEN=disabled`):
 
    ```bash
    curl -X POST https://<your-domain>/api/v1/tokens/initial/rotate \
      -H "Authorization: Bearer <your-token>"
    ```
 
-3. **Master `API_KEY` Secret:**
+3. **Revoking Custom Tokens in Bulk:**
 
-   You can optionally configure a fixed secret token:
+   To immediately invalidate custom `token:<id>` keys while keeping `initial_token` (or `API_KEY`) intact, click **Revoke All Custom** in **Settings → Active API Tokens** or call:
+
+   ```bash
+   curl -X DELETE https://<your-domain>/api/v1/tokens \
+     -H "Authorization: Bearer <initial-or-api-key>"
+   ```
+
+   Each call deletes up to 500 custom keys (5 KV list pages × 100) and returns `{ deleted: true, count, truncated }`; if `truncated` is `true`, run it again until all custom tokens are cleared.
+
+4. **Master `API_KEY` Secret (Strict Lockdown Mode):**
+
+   You can configure a fixed master secret token:
 
    ```bash
    pnpm --filter @redirect/api exec wrangler secret put API_KEY
    ```
 
-   > **Note:** When `API_KEY` is configured, the dynamic `initial_token` mechanism is completely disabled and only the secret is accepted. Removing the secret re-enables `initial_token`.
+   > **Note:** When `API_KEY` is configured, Redirect enters **strict lockdown mode** — **only** `API_KEY` is accepted, and **both** `initial_token` and all custom KV tokens are rejected (`401 Unauthorized`). Creating custom tokens (`POST /api/v1/tokens`) and rotating `initial_token` (`POST /api/v1/tokens/initial/rotate`) return `409 mechanism_disabled`, while `GET /tokens` and `DELETE /tokens*` remain available to inspect and revoke leftover KV tokens. Removing the secret re-enables KV token authentication.
+
+5. **Disabling `initial_token` (`INITIAL_TOKEN=disabled`):**
+
+   If you rely exclusively on expiring custom tokens (or want to disable recovery bootstrap without enabling `API_KEY`), create your custom tokens first and verify you still have a valid custom token or Cloudflare Dashboard access, then set `INITIAL_TOKEN=disabled` in Cloudflare Dashboard Secrets/Variables. While disabled, existing custom `token:*` keys keep working for links and analytics, and `/api/v1/tokens*` management is frozen until re-enabled (or inspected/revoked via `API_KEY`).
+
+### Rate Limiting & Edge Protections
+
+- **Worker Rate Limit Bindings (`apps/api/wrangler.jsonc`):**
+  - `API_LIMITER` (`120` requests / `60s` per normalized client IP or IPv6 `/64` prefix via `cf-connecting-ip`, location-local): protects `/api/v1/*` management endpoints, returning HTTP `429` (`rate_limited`, `Retry-After: 60`) when exceeded.
+  - `CLICK_LIMITER` (`10` requests / `60s` per normalized client IP or IPv6 `/64` prefix, location-local): runs inside `ctx.waitUntil` for countable clicks when analytics is enabled, gating click analytics writes (`recordClick`) so excessive bursts never affect `30x` redirect resolution while bounding D1 write consumption per POP.
+- **Recommended Free Zone WAF Rule:** In your Cloudflare Dashboard (**Security → Security rules / Rate limiting rules**), add the Free plan's 1 Zone WAF rate-limiting rule targeting `/api/v1/*` at a low threshold (e.g., 10–30 requests per 10 seconds per IP) for cross-POP protection before Worker execution.
+- **Structured Audit Logs:** Mutations (`token.create`, `token.revoke`, `token.revoke_all`, `token.initial_rotate`, `link.create`, `link.update`, `link.delete`, `link.import`, and `auth.forbidden`) emit structured JSON audit events via `console.info` without secret values or spoofable envelope fields.
+
+### Incident-Response Runbook
+
+- **Compromised Custom Token:** Revoke the single token in **Settings → Active API Tokens** (`DELETE /api/v1/tokens/:id`) or revoke custom tokens via **Revoke All Custom** (`DELETE /api/v1/tokens`). Allow up to ~60 seconds for global KV propagation.
+- **Compromised `initial_token`:** Rotate it via `POST /api/v1/tokens/initial/rotate` or delete `initial_token` in Dashboard KV; alternatively set `INITIAL_TOKEN=disabled` or configure an emergency `API_KEY` secret in Cloudflare Dashboard.
+- **Compromised `API_KEY`:** Replace immediately with `wrangler secret put API_KEY` (or Cloudflare Dashboard Secrets), or delete `API_KEY` to fall back to `initial_token` + custom tokens.
+- **Analytics Flood / D1 Quota Exhaustion:** Set `ANALYTICS_ENABLED=false` (case-insensitively accepts `false`, `0`, `off`, or `no`) in Dashboard Variables (applies immediately without redeploy via `keep_vars: true`), and enable or tighten your Cloudflare Zone WAF rate-limiting rule / Under Attack Mode. D1 free-tier quotas reset at `00:00 UTC`.
+- **Malicious Short Link:** Delete or deactivate the link in `/app/` or via `DELETE /api/v1/links/:id`, and review Workers Logs for `link.*` / `token.*` / `auth.forbidden` JSON audit events.
 
 ---
 
@@ -282,7 +318,7 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backu
 
    In addition to full-database D1 backups, Redirect supports links-only versioned JSON export and import (`version: 1`) from **Settings → Data Portability** or directly via the authenticated API:
 
-   - `GET /api/v1/links/export` — Streams links as cursor-paginated JSON (`limit` default `200`, max `500`, optional `search`, `tag`, `isActive` filters). Exports exclude analytics (`clickCount`, daily aggregates) and API tokens.
+   - `GET /api/v1/links/export` — Streams links as cursor-paginated JSON (`limit` default `500`, max `1000`, optional `search`, `tag`, `isActive` filters). Exports exclude analytics (`clickCount`, daily aggregates) and API tokens.
    - `POST /api/v1/links/import` — Imports up to `500` links per request (`onConflict`: `"skip"` default, or `"overwrite"`).
      - **Skip (`onConflict: "skip"`):** Keeps existing links untouched and returns skipped slugs in `skippedSlugs` and per-item `results`.
      - **Overwrite (`onConflict: "overwrite"`):** Updates existing links by slug while preserving their `id`, `created_at`, and click analytics. Omitted optional fields preserve existing values on overwrite rather than resetting to defaults.
@@ -321,7 +357,7 @@ pnpm dev
 
 By default, Vite binds to `localhost`, and browsers restrict Secure Context APIs (`navigator.clipboard` for copying short links/tokens/QR images, Service Worker registration, and PWA/Web Share Target) over plain HTTP on non-`localhost` addresses.
 
-1. **Allow network access & MagicDNS hostnames:** `apps/web/vite.config.ts` configures `server.host: true` and `server.allowedHosts` (including `.local` and `.ts.net`). Only port `5173` needs to be reachable—Vite proxies `/api` and `/:slug` locally to `wrangler dev` on `http://127.0.0.1:8787`. Add any extra host aliases to `OWN_HOSTNAMES` in `apps/api/.dev.vars` if you want cross-alias loop prevention.
+1. **Allow network access & MagicDNS hostnames:** `apps/web/vite.config.ts` configures `server.host: true` and `server.allowedHosts` (including `.local` and `.ts.net`, plus any comma-separated hosts configured in `ALLOWED_HOSTS` or `VITE_ALLOWED_HOSTS` via `.env*` or process environment). Only port `5173` needs to be reachable—Vite proxies `/api` and `/:slug` locally to `wrangler dev` on `http://127.0.0.1:8787`. Add any extra host aliases to `OWN_HOSTNAMES` in `apps/api/.dev.vars` if you want cross-alias loop prevention.
 2. **Expose over HTTPS with Tailscale Serve:** On the host machine logged into Tailscale (even when `pnpm dev` runs inside a container such as `code-server` with port `5173` published to the host), run:
 
    ```bash
@@ -338,7 +374,7 @@ All `/api/v1/*` endpoints require a valid bearer token (`Authorization: Bearer <
 
 - **Links & Transfer:** `GET /api/v1/links`, `POST /api/v1/links`, `GET /api/v1/links/export`, `POST /api/v1/links/import`, `GET /api/v1/links/:id`, `PATCH /api/v1/links/:id`, `DELETE /api/v1/links/:id`
 - **Analytics:** `GET /api/v1/links/:id/stats`
-- **Auth & Tokens:** `GET /api/v1/auth/verify`, `GET /api/v1/tokens`, `POST /api/v1/tokens`, `DELETE /api/v1/tokens/:id`, `POST /api/v1/tokens/initial/rotate`
+- **Auth & Tokens:** `GET /api/v1/auth/verify`, `GET /api/v1/tokens`, `POST /api/v1/tokens`, `DELETE /api/v1/tokens`, `DELETE /api/v1/tokens/:id`, `POST /api/v1/tokens/initial/rotate`
 
 ---
 

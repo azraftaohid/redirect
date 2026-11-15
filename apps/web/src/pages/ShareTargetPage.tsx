@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import type { LinkRecord } from "@redirect/shared";
+import { type LinkRecord, validateTargetUrl } from "@redirect/shared";
 import { listLinks, createLink } from "@/api/client";
 import { extractSharedPayload } from "@/utils/share";
 import { normalizeUrlInput } from "@/utils/url";
@@ -68,6 +68,13 @@ export function ShareTargetPage(): React.ReactElement {
     const target = normalizeUrlInput(targetUrl);
     if (!target) {
       toast.error("Invalid URL format");
+      return;
+    }
+
+    const ownHostnames = typeof window !== "undefined" ? [window.location.hostname] : [];
+    const validation = validateTargetUrl(target, ownHostnames);
+    if (!validation.ok) {
+      toast.error(validation.error);
       return;
     }
 

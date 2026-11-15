@@ -2,7 +2,10 @@ export interface Env {
   DB: D1Database;
   AUTH_TOKENS: KVNamespace;
   ASSETS?: Fetcher;
+  CLICK_LIMITER?: RateLimit;
+  API_LIMITER?: RateLimit;
   API_KEY?: string;
+  INITIAL_TOKEN?: string;
   FALLBACK_URL?: string;
   OWN_HOSTNAMES?: string;
   ANALYTICS_ENABLED?: string;

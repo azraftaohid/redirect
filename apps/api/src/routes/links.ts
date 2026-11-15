@@ -17,6 +17,7 @@ import {
 } from "@redirect/shared";
 import type { AppContext } from "../types.js";
 import { ApiError } from "../errors.js";
+import { logAuditEvent } from "../utils/audit.js";
 import {
   createLinkRecord,
   decodeExportCursor,
@@ -83,6 +84,10 @@ linksRouter.post(
       if (!record) {
         throw new ApiError(409, "slug_taken", `Slug '${body.slug}' is already taken.`);
       }
+      logAuditEvent("link.create", c.get("principal"), {
+        linkId: record.id,
+        slug: record.slug,
+      });
       return c.json(record, 201, { "Cache-Control": "no-store" });
     }
 
@@ -106,6 +111,10 @@ linksRouter.post(
       throw new ApiError(500, "slug_generation_failed", "Failed to generate unique slug.");
     }
 
+    logAuditEvent("link.create", c.get("principal"), {
+      linkId: record.id,
+      slug: record.slug,
+    });
     return c.json(record, 201, { "Cache-Control": "no-store" });
   }
 );
@@ -156,6 +165,10 @@ linksRouter.post(
     const body = c.req.valid("json");
     const ownHostnames = parseOwnHostnames(new URL(c.req.url).hostname, c.env.OWN_HOSTNAMES);
     const result = await importLinksBatch(c.env.DB, body.links, body.onConflict, ownHostnames);
+    logAuditEvent("link.import", c.get("principal"), {
+      onConflict: body.onConflict,
+      summary: result.summary,
+    });
     return c.json(result, 200, { "Cache-Control": "no-store" });
   }
 );
@@ -212,6 +225,11 @@ linksRouter.patch(
       if (!updated) {
         throw new ApiError(404, "not_found", `Link with id '${id}' not found.`);
       }
+      logAuditEvent("link.update", c.get("principal"), {
+        linkId: updated.id,
+        slug: updated.slug,
+        fields: Object.keys(body),
+      });
       return c.json(updated, 200, { "Cache-Control": "no-store" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -230,5 +248,6 @@ linksRouter.delete("/links/:id", async (c) => {
   if (!deleted) {
     throw new ApiError(404, "not_found", `Link with id '${id}' not found.`);
   }
+  logAuditEvent("link.delete", c.get("principal"), { linkId: id, slug: deleted.slug });
   return c.json({ deleted: true, id }, 200, { "Cache-Control": "no-store" });
 });

@@ -43,6 +43,8 @@ export function parseOwnHostnames(
   return Array.from(result);
 }
 
+export const UNSAFE_URL_CHARS_REGEX = /[\u0000-\u0020\u007F-\u009F\u2028\u2029]/;
+
 export function validateTargetUrl(
   url: string,
   ownHostnames: string[] = []
@@ -59,6 +61,13 @@ export function validateTargetUrl(
     return {
       ok: false,
       error: `Target URL exceeds maximum length of ${MAX_URL_LENGTH} characters.`,
+    };
+  }
+
+  if (UNSAFE_URL_CHARS_REGEX.test(url)) {
+    return {
+      ok: false,
+      error: "Target URL must not contain control characters or unencoded spaces.",
     };
   }
 

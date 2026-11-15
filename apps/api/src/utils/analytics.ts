@@ -79,13 +79,89 @@ export function isCountableClick(request: Request): boolean {
  * - With country: 3 statements / 3 rows written.
  * - With country, referrer: 4 statements / 4 rows written.
  */
+export function isAnalyticsDisabled(env: Env): boolean {
+  const raw = env.ANALYTICS_ENABLED?.trim().toLowerCase();
+  return raw === "false" || raw === "0" || raw === "off" || raw === "no";
+}
+
+function expandIpv4SuffixToHextets(part: string): string[] | null {
+  const octets = part.split(".");
+  if (octets.length !== 4) return null;
+  const nums = octets.map((o) => (/^\d{1,3}$/.test(o) ? Number(o) : -1));
+  if (nums.some((n) => n < 0 || n > 255)) return null;
+  const hi = ((nums[0]! << 8) | nums[1]!).toString(16);
+  const lo = ((nums[2]! << 8) | nums[3]!).toString(16);
+  return [hi, lo];
+}
+
+/**
+ * Normalizes an IP address for rate-limit bucketing:
+ * - Empty/missing -> "local"
+ * - IPv4 -> lowercased IPv4 string
+ * - IPv6 -> normalized /64 prefix (e.g. "2001:db8:0:1::/64") so single-user /64 subnets share a bucket
+ */
+export function normalizeIpBucket(rawIp?: string | null): string {
+  const trimmed = rawIp?.trim() ?? "";
+  if (!trimmed) return "local";
+
+  if (!trimmed.includes(":")) {
+    return trimmed.toLowerCase();
+  }
+
+  const zoneIdx = trimmed.indexOf("%");
+  const withoutZone = zoneIdx >= 0 ? trimmed.slice(0, zoneIdx) : trimmed;
+
+  const halves = withoutZone.split("::");
+  if (halves.length > 2) {
+    return withoutZone.toLowerCase();
+  }
+
+  const parseGroups = (seg: string, allowIpv4Tail: boolean): string[] | null => {
+    if (!seg) return [];
+    const parts = seg.split(":");
+    const out: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i] ?? "";
+      if (part.includes(".")) {
+        if (!allowIpv4Tail || i !== parts.length - 1) return null;
+        const expanded = expandIpv4SuffixToHextets(part);
+        if (!expanded) return null;
+        out.push(...expanded);
+      } else {
+        if (!/^[0-9a-fA-F]{1,4}$/.test(part)) return null;
+        out.push(parseInt(part, 16).toString(16));
+      }
+    }
+    return out;
+  };
+
+  let groups: string[];
+  if (halves.length === 2) {
+    const left = parseGroups(halves[0] ?? "", false);
+    const right = parseGroups(halves[1] ?? "", true);
+    if (!left || !right || left.length + right.length > 8) {
+      return withoutZone.toLowerCase();
+    }
+    const padCount = 8 - (left.length + right.length);
+    groups = [...left, ...Array<string>(padCount).fill("0"), ...right];
+  } else {
+    const parsed = parseGroups(withoutZone, true);
+    if (!parsed || parsed.length !== 8) {
+      return withoutZone.toLowerCase();
+    }
+    groups = parsed;
+  }
+
+  return `${groups[0]}:${groups[1]}:${groups[2]}:${groups[3]}::/64`;
+}
+
 export async function recordClick(
   env: Env,
   linkId: string,
   request: Request,
   now = new Date()
 ): Promise<D1Response[]> {
-  if (env.ANALYTICS_ENABLED === "false") {
+  if (isAnalyticsDisabled(env)) {
     return [];
   }
 

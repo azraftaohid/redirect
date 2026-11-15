@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { RESERVED_SLUGS, SLUG_REGEX } from "@redirect/shared";
 import type { AppContext, Env } from "./types.js";
-import { handleApiError, ApiError } from "./errors.js";
+import { handleApiError, ApiError, formatErrorResponse } from "./errors.js";
 import { authMiddleware } from "./auth/middleware.js";
 import { tokensRouter } from "./routes/tokens.js";
 import { linksRouter } from "./routes/links.js";
@@ -14,6 +14,21 @@ const apiApp = new Hono<AppContext>();
 
 apiApp.use("*", async (c, next) => {
   await next();
+  if (
+    (c.req.path === "/api/v1" || c.req.path.startsWith("/api/v1/")) &&
+    !c.get("principal") &&
+    c.res.status < 400
+  ) {
+    const { status, body } = formatErrorResponse(
+      401,
+      "unauthorized",
+      "Authentication required."
+    );
+    c.res = c.json(body, status, {
+      "WWW-Authenticate": "Bearer",
+      "Cache-Control": "no-store",
+    });
+  }
   c.header("X-Robots-Tag", "noindex, nofollow");
   c.header("X-Content-Type-Options", "nosniff");
 });
@@ -59,6 +74,8 @@ export default {
         status: 308,
         headers: {
           Location: target.toString(),
+          "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer",
         },
       });
     }
@@ -84,6 +101,8 @@ export default {
             headers: {
               Allow: "GET, HEAD",
               "Content-Type": "text/plain; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Referrer-Policy": "no-referrer",
             },
           });
         }
@@ -97,7 +116,15 @@ export default {
       try {
         const assetRes = await env.ASSETS.fetch(request);
         if (assetRes.status !== 404) {
-          return assetRes;
+          const headers = new Headers(assetRes.headers);
+          headers.set("X-Content-Type-Options", "nosniff");
+          headers.set("Referrer-Policy", "no-referrer");
+          headers.set("X-Frame-Options", "DENY");
+          return new Response(assetRes.body, {
+            status: assetRes.status,
+            statusText: assetRes.statusText,
+            headers,
+          });
         }
       } catch {
         // Ignore asset fetch failure and fallback to 404 page

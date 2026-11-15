@@ -1,7 +1,7 @@
 import { parseOwnHostnames, validateTargetUrl } from "@redirect/shared";
 import type { Env } from "../types.js";
 import { mergeQuery } from "../utils/query.js";
-import { isCountableClick, recordClick } from "../utils/analytics.js";
+import { isAnalyticsDisabled, isCountableClick, normalizeIpBucket, recordClick } from "../utils/analytics.js";
 import { renderNotFound } from "./app.js";
 
 interface LinkRedirectRow {
@@ -19,17 +19,23 @@ interface LinkRedirectRow {
  * Otherwise, render the 404 page.
  */
 export async function respondUnknownLink(request: Request, env: Env): Promise<Response> {
-  if (env.FALLBACK_URL) {
+  const fallbackUrl = env.FALLBACK_URL?.trim();
+  if (fallbackUrl) {
     const ownHostnames = parseOwnHostnames(new URL(request.url).hostname, env.OWN_HOSTNAMES);
-    const validation = validateTargetUrl(env.FALLBACK_URL, ownHostnames);
+    const validation = validateTargetUrl(fallbackUrl, ownHostnames);
     if (validation.ok) {
-      return new Response(null, {
-        status: 307,
-        headers: {
-          Location: env.FALLBACK_URL,
-          "Cache-Control": "no-store",
-        },
-      });
+      try {
+        return new Response(null, {
+          status: 307,
+          headers: {
+            Location: fallbackUrl,
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      } catch {
+        console.error("Failed to construct fallback redirect response");
+      }
     }
   }
   return renderNotFound(request, env);
@@ -42,7 +48,7 @@ export async function respondUnknownLink(request: Request, env: Env): Promise<Re
  * 3. On miss (unknown, inactive, expired), redirects to FALLBACK_URL (307) if valid and loop-free,
  *    otherwise renders the 404 page.
  * 4. On hit, merges raw query parameters byte-for-byte, applies correct Cache-Control,
- *    and schedules non-blocking analytics recording via waitUntil.
+ *    and schedules non-blocking analytics recording via waitUntil (rate-limited per IP/subnet).
  */
 export async function handleRedirect(
   slug: string,
@@ -56,6 +62,8 @@ export async function handleRedirect(
       headers: {
         Allow: "GET, HEAD",
         "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
       },
     });
   }
@@ -73,6 +81,7 @@ export async function handleRedirect(
       statusText: "Service Unavailable",
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   }
@@ -91,20 +100,41 @@ export async function handleRedirect(
   const status = link.status_code;
   const cacheControl = status === 301 || status === 308 ? "private, max-age=3600" : "no-store";
 
-  if (isCountableClick(request)) {
-    const promise = recordClick(env, link.id, request).catch(() => {});
+  let response: Response;
+  try {
+    response = new Response(null, {
+      status,
+      headers: {
+        Location: destination,
+        "Cache-Control": cacheControl,
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch {
+    console.error(`Failed to construct redirect response for link ${link.id}`);
+    return respondUnknownLink(request, env);
+  }
+
+  if (isCountableClick(request) && !isAnalyticsDisabled(env)) {
+    const ipBucket = normalizeIpBucket(request.headers.get("cf-connecting-ip"));
+    const analyticsTask = (async () => {
+      if (env.CLICK_LIMITER) {
+        try {
+          const { success } = await env.CLICK_LIMITER.limit({ key: `click:${ipBucket}` });
+          if (!success) return;
+        } catch {
+          // Fail open on limiter error
+        }
+      }
+      await recordClick(env, link.id, request);
+    })().catch(() => {});
+
     if (ctx && typeof ctx.waitUntil === "function") {
-      ctx.waitUntil(promise);
+      ctx.waitUntil(analyticsTask);
     }
   }
 
-  return new Response(null, {
-    status,
-    headers: {
-      Location: destination,
-      "Cache-Control": cacheControl,
-    },
-  });
+  return response;
 }
 
 /**

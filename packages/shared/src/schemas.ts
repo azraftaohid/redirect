@@ -14,7 +14,7 @@ import {
   SLUG_REGEX,
   type ImportConflictMode,
 } from "./constants.js";
-import { validateSlug } from "./validation.js";
+import { UNSAFE_URL_CHARS_REGEX, validateSlug } from "./validation.js";
 
 export const slugSchema = z
   .string()
@@ -36,6 +36,13 @@ export const targetUrlSchema = z
   .min(1, "Target URL is required")
   .max(MAX_URL_LENGTH, `Target URL must be at most ${MAX_URL_LENGTH} characters`)
   .superRefine((val, ctx) => {
+    if (UNSAFE_URL_CHARS_REGEX.test(val)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Target URL must not contain control characters or unencoded spaces",
+      });
+      return;
+    }
     try {
       const parsed = new URL(val);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {

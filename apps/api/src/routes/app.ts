@@ -6,12 +6,17 @@ export const APP_SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "X-Robots-Tag": "noindex, nofollow",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 } as const;
 
 /**
  * Returns the 404 page: body of /404.html asset with status 404.
  * If the asset is missing, returns plain text "Not found" with status 404.
  */
+const NOT_FOUND_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
 export async function renderNotFound(request: Request, env: Env): Promise<Response> {
   if (env.ASSETS) {
     try {
@@ -19,6 +24,11 @@ export async function renderNotFound(request: Request, env: Env): Promise<Respon
       if (res.status === 200) {
         const headers = new Headers(res.headers);
         headers.set("Cache-Control", "no-store");
+        headers.set("X-Content-Type-Options", "nosniff");
+        headers.set("Referrer-Policy", "no-referrer");
+        headers.set("X-Frame-Options", "DENY");
+        headers.set("X-Robots-Tag", "noindex, nofollow");
+        headers.set("Content-Security-Policy", NOT_FOUND_CSP);
         return new Response(res.body, {
           status: 404,
           statusText: "Not Found",
@@ -36,6 +46,11 @@ export async function renderNotFound(request: Request, env: Env): Promise<Respon
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY",
+      "X-Robots-Tag": "noindex, nofollow",
+      "Content-Security-Policy": NOT_FOUND_CSP,
     },
   });
 }

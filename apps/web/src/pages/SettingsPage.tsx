@@ -5,6 +5,7 @@ import {
   listTokens,
   createToken,
   deleteToken,
+  revokeAllTokens,
   rotateInitialToken,
 } from "@/api/client";
 import { formatDisplayDate } from "@/utils/dates";
@@ -86,15 +87,27 @@ export function SettingsPage(): React.ReactElement {
   const [rotateAlertOpen, setRotateAlertOpen] = useState(false);
   const [rotating, setRotating] = useState(false);
 
+  // Revoke all custom tokens alert
+  const [revokeAllAlertOpen, setRevokeAllAlertOpen] = useState(false);
+  const [revokingAll, setRevokingAll] = useState(false);
+
   // Import & Export
   const [exportingLinks, setExportingLinks] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   const storedToken = activeToken || "";
+  const canManageTokens = principal?.kind === "env" || principal?.kind === "initial";
+  const isEnvKeySession = principal?.kind === "env";
   const hasInitialToken = tokens.some((t) => t.isInitial);
+  const customTokenCount = tokens.filter((t) => !t.isInitial).length;
   const minExpiry = new Date(Date.now() + 120_000).toISOString().slice(0, 16);
 
   const fetchTokens = useCallback(async () => {
+    if (!canManageTokens) {
+      setTokens([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await listTokens();
@@ -104,7 +117,7 @@ export function SettingsPage(): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canManageTokens]);
 
   useEffect(() => {
     fetchTokens();
@@ -197,6 +210,26 @@ export function SettingsPage(): React.ReactElement {
       toast.error(err instanceof Error ? err.message : "Failed to rotate initial token");
     } finally {
       setRotating(false);
+    }
+  }
+
+  async function handleConfirmRevokeAll() {
+    setRevokingAll(true);
+    try {
+      const res = await revokeAllTokens();
+      setRevokeAllAlertOpen(false);
+      if (res.truncated) {
+        toast.warning(
+          `Revoked ${res.count} custom token(s). More tokens remain — click "Revoke All Custom" again to continue.`,
+        );
+      } else {
+        toast.success(`Revoked ${res.count} custom token(s).`);
+      }
+      fetchTokens();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke custom tokens");
+    } finally {
+      setRevokingAll(false);
     }
   }
 
@@ -309,104 +342,146 @@ export function SettingsPage(): React.ReactElement {
               Bearer tokens authorized to access the Redirect REST API.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
-            {hasInitialToken && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRotateAlertOpen(true)}
-                className="h-8 gap-1.5 text-xs"
-                title="Rotate initial token in KV"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Rotate Initial</span>
-              </Button>
-            )}
+          {canManageTokens && (
+            <div className="flex flex-wrap items-center gap-2">
+              {customTokenCount > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRevokeAllAlertOpen(true)}
+                  className="h-8 gap-1.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40"
+                  title="Revoke all custom tokens"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Revoke All Custom</span>
+                </Button>
+              )}
 
-            <Button
-              size="sm"
-              onClick={() => setCreateModalOpen(true)}
-              className="h-8 gap-1.5 text-xs font-semibold"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Create Token</span>
-            </Button>
-          </div>
+              {hasInitialToken && !isEnvKeySession && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRotateAlertOpen(true)}
+                  className="h-8 gap-1.5 text-xs"
+                  title="Rotate initial token in KV"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Rotate Initial</span>
+                </Button>
+              )}
+
+              {!isEnvKeySession && (
+                <Button
+                  size="sm"
+                  onClick={() => setCreateModalOpen(true)}
+                  className="h-8 gap-1.5 text-xs font-semibold"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create Token</span>
+                </Button>
+              )}
+            </div>
+          )}
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {!canManageTokens ? (
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 text-xs text-zinc-600 dark:text-zinc-400 flex items-start gap-2.5">
+              <ShieldAlert className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
+              <p>
+                Token management is restricted to sessions authenticated with the initial token or master{" "}
+                <code className="font-mono">API_KEY</code>. Custom tokens can manage links and analytics, but cannot view, create, rotate, or revoke API tokens.
+              </p>
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center py-12 gap-2 text-xs text-zinc-400">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Loading tokens...</span>
             </div>
-          ) : tokens.length === 0 ? (
-            <div className="text-center py-12 text-xs text-zinc-400">
-              No custom tokens created yet.
-            </div>
           ) : (
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {tokens.map((t) => {
-                const isCurrent =
-                  (principal?.kind === "token" && principal?.id === t.id) ||
-                  (principal?.kind === "initial" && t.isInitial);
+            <>
+              {isEnvKeySession && (
+                <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <p>
+                    <span className="font-medium">
+                      Strict lockdown mode (<code className="font-mono">API_KEY</code> set):
+                    </span>{" "}
+                    KV-backed custom tokens and the initial token cannot authenticate while master{" "}
+                    <code className="font-mono">API_KEY</code> is configured. Creating new tokens and rotating the initial token are disabled; you can still revoke any leftover KV tokens below.
+                  </p>
+                </div>
+              )}
 
-                return (
-                  <div
-                    key={t.id}
-                    className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                  >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-base">{t.name}</span>
-                        {t.isInitial && (
-                          <Badge variant="outline" className="text-xs py-0.5 px-2 text-amber-600 border-amber-300">
-                            Initial
-                          </Badge>
-                        )}
-                        {isCurrent && (
-                          <Badge variant="secondary" className="text-xs py-0.5 px-2">
-                            Active Session
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400 font-mono">
-                        <span>Preview: {t.preview}</span>
-                        <span>&bull;</span>
-                        <span>Created: {formatDisplayDate(t.createdAt)}</span>
-                        {t.expiresAt && (
-                          <>
+              {tokens.length === 0 ? (
+                <div className="text-center py-12 text-xs text-zinc-400">
+                  No custom tokens created yet.
+                </div>
+              ) : (
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {tokens.map((t) => {
+                    const isCurrent =
+                      (principal?.kind === "token" && principal?.id === t.id) ||
+                      (principal?.kind === "initial" && t.isInitial);
+
+                    return (
+                      <div
+                        key={t.id}
+                        className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-base">{t.name}</span>
+                            {t.isInitial && (
+                              <Badge variant="outline" className="text-xs py-0.5 px-2 text-amber-600 border-amber-300">
+                                Initial
+                              </Badge>
+                            )}
+                            {isCurrent && (
+                              <Badge variant="secondary" className="text-xs py-0.5 px-2">
+                                Active Session
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400 font-mono">
+                            <span>Preview: {t.preview}</span>
                             <span>&bull;</span>
-                            <span>Expires: {formatDisplayDate(t.expiresAt)}</span>
-                          </>
+                            <span>Created: {formatDisplayDate(t.createdAt)}</span>
+                            {t.expiresAt && (
+                              <>
+                                <span>&bull;</span>
+                                <span>Expires: {formatDisplayDate(t.expiresAt)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {t.isInitial ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setRotateAlertOpen(true)}
+                            className="h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Rotate</span>
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setTokenToDelete(t)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Revoke</span>
+                          </Button>
                         )}
                       </div>
-                    </div>
-
-                    {t.isInitial ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setRotateAlertOpen(true)}
-                        className="h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Rotate</span>
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setTokenToDelete(t)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 h-8 px-2.5 text-sm gap-1.5 self-end sm:self-center"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Revoke</span>
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -595,6 +670,31 @@ export function SettingsPage(): React.ReactElement {
               disabled={rotating}
             >
               {rotating ? "Rotating..." : "Rotate & Reveal New Token"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Revoke All Custom Tokens Alert */}
+      <AlertDialog open={revokeAllAlertOpen} onOpenChange={setRevokeAllAlertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke All Custom Tokens?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will immediately delete all {customTokenCount} custom API token(s) from Cloudflare KV. Any integrations or scripts using them will lose access immediately. The initial token and master API_KEY (if set) are not affected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revokingAll}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmRevokeAll();
+              }}
+              disabled={revokingAll}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {revokingAll ? "Revoking..." : "Revoke All Custom Tokens"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

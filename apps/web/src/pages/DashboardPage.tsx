@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { LinkRecord, ListLinksQuery } from "@redirect/shared";
+import { type LinkRecord, type ListLinksQuery, validateTargetUrl } from "@redirect/shared";
 import { listLinks, createLink } from "@/api/client";
 import { LinkRow } from "@/components/LinkRow";
 import { LinkFormModal } from "@/components/LinkFormModal";
@@ -153,10 +153,10 @@ export function DashboardPage(): React.ReactElement {
     const target = normalizeUrlInput(quickUrl);
     if (!target) return;
 
-    try {
-      new URL(target);
-    } catch {
-      toast.error("Please enter a valid URL");
+    const ownHostnames = typeof window !== "undefined" ? [window.location.hostname] : [];
+    const validation = validateTargetUrl(target, ownHostnames);
+    if (!validation.ok) {
+      toast.error(validation.error);
       return;
     }
 

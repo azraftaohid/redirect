@@ -1,6 +1,26 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { env, SELF } from "cloudflare:test";
-import { TOKEN_FORMAT } from "../src/auth/tokens.js";
+import { env, SELF, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import worker from "../src/index.js";
+import {
+  TOKEN_FORMAT,
+  authenticate,
+  ensureInitialToken,
+  rotateInitialToken,
+} from "../src/auth/tokens.js";
+import type { Env } from "../src/types.js";
+
+async function fetchWorker(
+  input: string | Request,
+  init?: RequestInit,
+  envOverrides?: Partial<Env>
+) {
+  const req = typeof input === "string" ? new Request(input, init) : input;
+  const currentEnv = envOverrides ? { ...env, ...envOverrides } : env;
+  const ctx = createExecutionContext();
+  const res = await worker.fetch(req, currentEnv, ctx);
+  await waitOnExecutionContext(ctx);
+  return res;
+}
 
 describe("Authentication & Token Management", () => {
   beforeEach(async () => {
@@ -179,7 +199,7 @@ describe("Authentication & Token Management", () => {
     const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
 
     let listCalls = 0;
-    vi.spyOn(env.AUTH_TOKENS, "list").mockImplementation(async () => {
+    const listSpy = vi.spyOn(env.AUTH_TOKENS, "list").mockImplementation(async () => {
       listCalls++;
       return {
         keys: [{ name: `token:tok_${listCalls}`, metadata: { name: `T${listCalls}` } }],
@@ -188,11 +208,15 @@ describe("Authentication & Token Management", () => {
       } as any;
     });
 
-    const res = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
-      headers: { Authorization: `Bearer ${initialToken}` },
-    });
-    expect(res.status).toBe(200);
-    expect(listCalls).toBe(5);
+    try {
+      const res = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+        headers: { Authorization: `Bearer ${initialToken}` },
+      });
+      expect(res.status).toBe(200);
+      expect(listCalls).toBe(5);
+    } finally {
+      listSpy.mockRestore();
+    }
   });
 
   it("validates token expiry on creation (B5)", async () => {
@@ -361,5 +385,303 @@ describe("Authentication & Token Management", () => {
     const body = (await res.json()) as any;
     expect(body.principal.id).toBe(id);
     expect(body.principal.name).toBe("Dashboard Token");
+  });
+
+  it("enforces strict API_KEY lockdown rejecting both initial and custom KV tokens", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
+
+    const createRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${initialToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Custom While Unlocked" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { token: customToken } = (await createRes.json()) as any;
+
+    const lockedEnv: Partial<Env> = { API_KEY: "super-secret-master-key" };
+
+    // Initial token and custom KV tokens must both be rejected when API_KEY is set
+    const initRes = await fetchWorker(
+      "https://redirect.example.com/api/v1/links",
+      { headers: { Authorization: `Bearer ${initialToken}` } },
+      lockedEnv
+    );
+    expect(initRes.status).toBe(401);
+
+    const customRes = await fetchWorker(
+      "https://redirect.example.com/api/v1/links",
+      { headers: { Authorization: `Bearer ${customToken}` } },
+      lockedEnv
+    );
+    expect(customRes.status).toBe(401);
+
+    // Master API_KEY succeeds with principal kind "env"
+    const masterRes = await fetchWorker(
+      "https://redirect.example.com/api/v1/auth/verify",
+      { headers: { Authorization: "Bearer super-secret-master-key" } },
+      lockedEnv
+    );
+    expect(masterRes.status).toBe(200);
+    const masterBody = (await masterRes.json()) as any;
+    expect(masterBody.principal.kind).toBe("env");
+  });
+
+  it("supports INITIAL_TOKEN=disabled to block initial bootstrap and initial token auth", async () => {
+    const disabledEnv = { ...env, INITIAL_TOKEN: "disabled" } as Env;
+
+    // 1. Does not bootstrap initial_token in KV
+    const ensureRes = await ensureInitialToken(disabledEnv);
+    expect(ensureRes).toBeNull();
+    expect(await env.AUTH_TOKENS.get("initial_token")).toBeNull();
+
+    const verifyUnauth = await fetchWorker(
+      "https://redirect.example.com/api/v1/auth/verify",
+      undefined,
+      { INITIAL_TOKEN: "disabled" }
+    );
+    expect(verifyUnauth.status).toBe(401);
+    expect(await env.AUTH_TOKENS.get("initial_token")).toBeNull();
+
+    // 2. Rejects an existing initial_token in KV when disabled
+    await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    const existingInitial = (await env.AUTH_TOKENS.get("initial_token"))!;
+    expect(await authenticate(disabledEnv, existingInitial)).toBeNull();
+
+    const resInitial = await fetchWorker(
+      "https://redirect.example.com/api/v1/links",
+      { headers: { Authorization: `Bearer ${existingInitial}` } },
+      { INITIAL_TOKEN: "disabled" }
+    );
+    expect(resInitial.status).toBe(401);
+
+    // 3. rotateInitialToken rejects when INITIAL_TOKEN=disabled
+    await expect(rotateInitialToken(disabledEnv)).rejects.toThrow(
+      "Cannot rotate initial token when INITIAL_TOKEN is disabled."
+    );
+
+    // 4. GET /tokens omits initial and POST /tokens + POST /tokens/initial/rotate return 409 mechanism_disabled when API_KEY is set
+    const adminEnv: Partial<Env> = {
+      API_KEY: "admin-key-for-test",
+      INITIAL_TOKEN: "disabled",
+    };
+    const listRes = await fetchWorker(
+      "https://redirect.example.com/api/v1/tokens",
+      { headers: { Authorization: "Bearer admin-key-for-test" } },
+      adminEnv
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as any;
+    expect(listBody.data.some((t: any) => t.isInitial)).toBe(false);
+
+    const createBlockedRes = await fetchWorker(
+      "https://redirect.example.com/api/v1/tokens",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-key-for-test",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Blocked By API_KEY" }),
+      },
+      adminEnv
+    );
+    expect(createBlockedRes.status).toBe(409);
+    const createBlockedBody = (await createBlockedRes.json()) as any;
+    expect(createBlockedBody.error.code).toBe("mechanism_disabled");
+
+    const rotateRes = await fetchWorker(
+      "https://redirect.example.com/api/v1/tokens/initial/rotate",
+      {
+        method: "POST",
+        headers: { Authorization: "Bearer admin-key-for-test" },
+      },
+      adminEnv
+    );
+    expect(rotateRes.status).toBe(409);
+    const rotateBody = (await rotateRes.json()) as any;
+    expect(rotateBody.error.code).toBe("mechanism_disabled");
+  });
+
+  it("restricts token management routes to initial or env principals (403 for custom tokens)", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
+
+    const createRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${initialToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Limited Custom Token" }),
+    });
+    const { token: customToken, id: customId } = (await createRes.json()) as any;
+
+    // Custom token CAN access verify and links
+    const verifyRes = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
+      headers: { Authorization: `Bearer ${customToken}` },
+    });
+    expect(verifyRes.status).toBe(200);
+
+    const linksRes = await SELF.fetch("https://redirect.example.com/api/v1/links", {
+      headers: { Authorization: `Bearer ${customToken}` },
+    });
+    expect(linksRes.status).toBe(200);
+
+    // Custom token receives 403 forbidden on all token-management endpoints
+    const forbiddenChecks = [
+      SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+        headers: { Authorization: `Bearer ${customToken}` },
+      }),
+      SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${customToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Escalation Attempt" }),
+      }),
+      SELF.fetch(`https://redirect.example.com/api/v1/tokens/${customId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${customToken}` },
+      }),
+      SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${customToken}` },
+      }),
+      SELF.fetch("https://redirect.example.com/api/v1/tokens/initial/rotate", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${customToken}` },
+      }),
+    ];
+
+    const responses = await Promise.all(forbiddenChecks);
+    for (const r of responses) {
+      expect(r.status).toBe(403);
+      const errBody = (await r.json()) as any;
+      expect(errBody.error.code).toBe("forbidden");
+    }
+
+    // Encoded line terminators must never bypass requireTokenAdmin or expose token handlers
+    const bypassSeqs = ["%0A", "%0D", "%0D%0A", "%E2%80%A8", "%E2%80%A9"];
+    for (const seq of bypassSeqs) {
+      const delRes = await fetchWorker(
+        `https://redirect.example.com/api/v1/tokens/${seq}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${customToken}` } }
+      );
+      expect(delRes.status).toBe(403);
+      const delErr = (await delRes.json()) as any;
+      expect(delErr.error.code).toBe("forbidden");
+
+      const suffixedRes = await fetchWorker(
+        `https://redirect.example.com/api/v1/tokens${seq}`,
+        { headers: { Authorization: `Bearer ${customToken}` } }
+      );
+      expect([403, 404]).toContain(suffixedRes.status);
+      expect(suffixedRes.status).not.toBe(200);
+    }
+  });
+
+  it("supports DELETE /api/v1/tokens to revoke all custom tokens while preserving initial_token", async () => {
+    await SELF.fetch("https://redirect.example.com/api/v1/auth/verify");
+    const initialToken = (await env.AUTH_TOKENS.get("initial_token"))!;
+
+    const tokensCreated: string[] = [];
+    for (const name of ["Custom One", "Custom Two"]) {
+      const res = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${initialToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name }),
+      });
+      const body = (await res.json()) as any;
+      tokensCreated.push(body.token);
+    }
+
+    const revokeAllRes = await SELF.fetch("https://redirect.example.com/api/v1/tokens", {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${initialToken}` },
+    });
+    expect(revokeAllRes.status).toBe(200);
+    const revokeBody = (await revokeAllRes.json()) as any;
+    expect(revokeBody).toEqual({ deleted: true, count: 2, truncated: false });
+
+    // Custom tokens must now fail authentication
+    for (const t of tokensCreated) {
+      const verify = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      expect(verify.status).toBe(401);
+    }
+
+    // initial_token still exists and authenticates
+    expect(await env.AUTH_TOKENS.get("initial_token")).toBe(initialToken);
+    const initVerify = await SELF.fetch("https://redirect.example.com/api/v1/auth/verify", {
+      headers: { Authorization: `Bearer ${initialToken}` },
+    });
+    expect(initVerify.status).toBe(200);
+  });
+
+  it("caps DELETE /api/v1/tokens pagination at MAX_KV_LIST_PAGES and reports truncated: true", async () => {
+    const deleteMock = vi.fn().mockResolvedValue(undefined);
+    const listMock = vi.fn().mockImplementation(({ cursor }: { cursor?: string }) => {
+      const page = cursor ? Number(cursor) : 1;
+      return Promise.resolve({
+        keys: [{ name: `token:000000000${page}` }],
+        list_complete: false,
+        cursor: String(page + 1),
+        cacheStatus: null,
+      });
+    });
+
+    const res = await fetchWorker(
+      "https://redirect.example.com/api/v1/tokens",
+      {
+        method: "DELETE",
+        headers: { Authorization: "Bearer admin-secret-key" },
+      },
+      {
+        API_KEY: "admin-secret-key",
+        AUTH_TOKENS: {
+          ...env.AUTH_TOKENS,
+          list: listMock,
+          delete: deleteMock,
+        } as unknown as KVNamespace,
+      }
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body).toEqual({ deleted: true, count: 5, truncated: true });
+    expect(listMock).toHaveBeenCalledTimes(5);
+    expect(listMock).toHaveBeenCalledWith({ prefix: "token:", limit: 100, cursor: undefined });
+    expect(deleteMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("returns 429 rate_limited with Retry-After: 60 when API_LIMITER denies a request", async () => {
+    const limitMock = vi.fn().mockResolvedValue({ success: false });
+    const res = await fetchWorker(
+      "https://redirect.example.com/api/v1/links",
+      {
+        headers: {
+          "cf-connecting-ip": "198.51.100.77",
+        },
+      },
+      {
+        API_LIMITER: { limit: limitMock },
+      }
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(limitMock).toHaveBeenCalledWith({ key: "api:198.51.100.77" });
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe("rate_limited");
   });
 });

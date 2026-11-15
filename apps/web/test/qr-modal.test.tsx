@@ -53,6 +53,9 @@ describe("QrCodeModal", () => {
       expect(pngBtn).not.toBeDisabled();
     });
 
+    const previewImg = screen.getByRole("img", { name: "QR code for /docs" });
+    expect(previewImg.getAttribute("src")).toContain("data:image/svg+xml;charset=utf-8,");
+
     const dialog = screen.getByRole("dialog");
     expect(dialog.className).toContain("sm:max-w-lg");
     expect(dialog.className).not.toContain("sm:max-w-md");

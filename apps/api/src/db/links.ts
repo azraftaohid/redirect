@@ -263,9 +263,15 @@ export async function updateLinkRecord(
   return mapRowToLinkRecord(row);
 }
 
-export async function deleteLinkRecord(db: D1Database, id: string): Promise<boolean> {
-  const res = await db.prepare("DELETE FROM links WHERE id = ?").bind(id).run();
-  return (res.meta.changes ?? 0) > 0;
+export async function deleteLinkRecord(
+  db: D1Database,
+  id: string
+): Promise<{ slug: string } | null> {
+  const row = await db
+    .prepare("DELETE FROM links WHERE id = ? RETURNING slug")
+    .bind(id)
+    .first<{ slug: string }>();
+  return row ? { slug: String(row.slug) } : null;
 }
 
 const SQL_IN_CHUNK_SIZE = 50;
@@ -737,8 +743,8 @@ export async function importLinksBatch(
     try {
       batchResults = await db.batch(chunk.map((w) => w.stmt));
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Database write failed for this chunk.";
+      console.error("Import batch write failed:", err);
+      const message = "Database write failed for this chunk.";
       for (const write of chunk) {
         errors.push({
           index: write.index,

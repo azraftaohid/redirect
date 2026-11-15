@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 function copy404Plugin(): Plugin {
   return {
@@ -57,31 +57,45 @@ function devRootRedirectPlugin(): Plugin {
   };
 }
 
-export default defineConfig({
-  base: "/app/",
-  build: {
-    outDir: "dist/app",
-    emptyOutDir: true,
-  },
-  resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "./src"),
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const extraAllowedHosts = (
+    process.env.ALLOWED_HOSTS ??
+    process.env.VITE_ALLOWED_HOSTS ??
+    env.ALLOWED_HOSTS ??
+    env.VITE_ALLOWED_HOSTS ??
+    ""
+  )
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
+
+  return {
+    base: "/app/",
+    build: {
+      outDir: "dist/app",
+      emptyOutDir: true,
     },
-  },
-  plugins: [tailwindcss(), react(), copy404Plugin(), injectBuildIdPlugin(), devRootRedirectPlugin()],
-  server: {
-    port: 5173,
-    host: true,
-    allowedHosts: ["orbit-3", "atlas-1", ".local", ".ts.net"],
-    proxy: {
-      "/api": {
-        target: "http://127.0.0.1:8787",
-        changeOrigin: false,
-      },
-      "^/(?!app|@|node_modules|src|public|favicon|.*\\..*)[^/]+/?$": {
-        target: "http://127.0.0.1:8787",
-        changeOrigin: false,
+    resolve: {
+      alias: {
+        "@": path.resolve(import.meta.dirname, "./src"),
       },
     },
-  },
+    plugins: [tailwindcss(), react(), copy404Plugin(), injectBuildIdPlugin(), devRootRedirectPlugin()],
+    server: {
+      port: 5173,
+      host: true,
+      allowedHosts: [...new Set([".local", ".ts.net", ...extraAllowedHosts])],
+      proxy: {
+        "/api": {
+          target: "http://127.0.0.1:8787",
+          changeOrigin: false,
+        },
+        "^/(?!app|@|node_modules|src|public|favicon|.*\\..*)[^/]+/?$": {
+          target: "http://127.0.0.1:8787",
+          changeOrigin: false,
+        },
+      },
+    },
+  };
 });

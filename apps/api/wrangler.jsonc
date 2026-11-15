@@ -27,5 +27,23 @@
     {
       "binding": "AUTH_TOKENS"
     }
+  ],
+  "ratelimits": [
+    {
+      "name": "CLICK_LIMITER",
+      "namespace_id": "84021001",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "API_LIMITER",
+      "namespace_id": "84021002",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
   ]
 }
