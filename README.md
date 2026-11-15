@@ -314,16 +314,16 @@ Because Redirect uses standard Cloudflare D1 SQLite storage, full-database backu
    pnpm --filter @redirect/api exec wrangler d1 time-travel restore redirect-prod --remote --bookmark=<bookmark-id>
    ```
 
-3. **Portable Links JSON Export & Import (Settings / API):**
+3. **Portable Links Export & Dynamic Import (Settings / API):**
 
-   In addition to full-database D1 backups, Redirect supports links-only versioned JSON export and import (`version: 1`) from **Settings → Data Portability** or directly via the authenticated API:
+   In addition to full-database D1 backups, Redirect supports links-only versioned JSON export and import (`version: 1`) from **Settings → Data Portability** or directly via the authenticated API, plus dynamic client-side JSON/CSV mapping in the web UI:
 
    - `GET /api/v1/links/export` — Streams links as cursor-paginated JSON (`limit` default `500`, max `1000`, optional `search`, `tag`, `isActive` filters). Exports exclude analytics (`clickCount`, daily aggregates) and API tokens.
    - `POST /api/v1/links/import` — Imports up to `500` links per request (`onConflict`: `"skip"` default, or `"overwrite"`).
      - **Skip (`onConflict: "skip"`):** Keeps existing links untouched and returns skipped slugs in `skippedSlugs` and per-item `results`.
      - **Overwrite (`onConflict: "overwrite"`):** Updates existing links by slug while preserving their `id`, `created_at`, and click analytics. Omitted optional fields preserve existing values on overwrite rather than resetting to defaults.
      - **Past `expiresAt` values:** Intentionally allowed on import for round-trip backup fidelity; expired links continue to evaluate expiration at redirect time.
-     - Larger files sent from the web UI are automatically chunked into `200`-link requests.
+     - **Web UI Importer (`Settings → Data Portability → Import Links (JSON / CSV)`):** Supports native `version: 1` Redirect exports (1-click fast path or customizable mapping), arbitrary JSON arrays or objects (with nested array property selector), and CSV files (RFC 4180 parser with auto/custom delimiter and header toggle). Users can map source fields or enter constant values per Redirect field, parse string dates or numeric/string epoch timestamps into UTC ISO strings, preview converted rows and pre-flight validation errors, and upload large datasets automatically in `200`-link chunks.
 
 ---
 

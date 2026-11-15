@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dynamic JSON / CSV Link Importer (`@redirect/shared`, `ImportLinksModal`):** Added browser-side parsing, field mapping, constant overrides, string/epoch timestamp UTC conversion, pre-flight validation with original row error preservation, and chunked submission via `importLinksChunked` for Redirect v1 exports (fast path + optional customization), custom JSON arrays/objects (with nested array path selection), and RFC 4180 CSV files (`,` / `;` / `\t` delimiters and optional header row).
+
 ### Security & Changed
 
 - **Rate Limiting & Analytics Controls:** Tuned `API_LIMITER` (`120 req / 60s` per normalized IP or IPv6 `/64` prefix) and `CLICK_LIMITER` (`10 req / 60s` per normalized IP or IPv6 `/64` prefix), moved click rate-limiting inside `ctx.waitUntil` gated by countable clicks and enabled analytics, and made `ANALYTICS_ENABLED` accept case-insensitive `"false"`, `"0"`, `"off"`, and `"no"`.

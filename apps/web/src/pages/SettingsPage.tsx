@@ -491,7 +491,7 @@ export function SettingsPage(): React.ReactElement {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Data Portability (Import &amp; Export)</CardTitle>
           <CardDescription>
-            Export all short links and metadata as versioned JSON (excluding analytics and API tokens), or import links from an export file.
+            Export all short links and metadata as versioned JSON (excluding analytics and API tokens), or import links from a JSON or CSV file.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
@@ -519,7 +519,7 @@ export function SettingsPage(): React.ReactElement {
             className="h-9 gap-1.5 text-sm"
           >
             <Upload className="w-4 h-4" />
-            <span>Import Links (JSON)</span>
+            <span>Import Links (JSON / CSV)</span>
           </Button>
         </CardContent>
       </Card>
