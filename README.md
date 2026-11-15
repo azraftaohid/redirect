@@ -11,6 +11,14 @@ Designed as a single Cloudflare Worker with Static Assets, Redirect handles publ
 - **Token-Authenticated REST API (`/api/v1/*`):** Full CRUD for links, analytics stats, token lifecycle management, cursor-paginated JSON export, and chunk-friendly batch JSON import.
 - **Cost-Aware Analytics & Backups:** Daily D1 rollup aggregates (`link_daily_clicks`, optional `link_daily_dims`) with non-blocking `ctx.waitUntil()` writes, plus D1 SQLite export/Time Travel and portable links-only JSON export and JSON/CSV import.
 
+### Screenshots
+
+![Links Dashboard](docs/screenshots/links_tab.png)
+
+| Create Short Link | Link Analytics | Settings & Data Portability |
+| :---: | :---: | :---: |
+| ![Create Short Link](docs/screenshots/link_creator_dialog.png) | ![Link Analytics](docs/screenshots/link_stats_page.png) | ![Settings & Data Portability](docs/screenshots/settings_tab.png) |
+
 ---
 
 ## Architecture & Request Routing
