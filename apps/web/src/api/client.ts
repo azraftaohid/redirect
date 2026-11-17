@@ -85,6 +85,11 @@ export interface AuthPrincipal {
   name: string;
 }
 
+export interface AuthVerifyResponse {
+  principal: AuthPrincipal;
+  brandingExternalLinks?: boolean;
+}
+
 interface RequestOptions extends RequestInit {
   token?: string | null;
 }
@@ -160,8 +165,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 // Typed API Endpoints
 // -----------------------------------------------------------------------------
 
-export async function verifyAuth(candidateToken?: string): Promise<{ principal: AuthPrincipal }> {
-  return request<{ principal: AuthPrincipal }>("/api/v1/auth/verify", {
+export async function verifyAuth(candidateToken?: string): Promise<AuthVerifyResponse> {
+  return request<AuthVerifyResponse>("/api/v1/auth/verify", {
     method: "GET",
     token: candidateToken !== undefined ? candidateToken : getStoredToken(),
   });

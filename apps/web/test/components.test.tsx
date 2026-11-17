@@ -9,6 +9,8 @@ import { AccessExpiredBanner } from "../src/components/AccessExpiredBanner";
 import { DailyChart } from "../src/components/DailyChart";
 import { Layout } from "../src/components/Layout";
 import { AppLogo } from "../src/components/AppLogo";
+import { NotFoundPage, NotFoundCard } from "../src/pages/NotFoundPage";
+import { setStoredToken } from "../src/api/client";
 
 describe("UI Components", () => {
   it("renders Button with custom label and click handler", () => {
@@ -246,5 +248,71 @@ describe("DailyChart & Layout Navigation", () => {
     const authLogo = authContainer.querySelector('svg[viewBox="0 0 100 100"]');
     expect(authLogo).toBeInTheDocument();
     expect(authLogo).toHaveClass("w-12", "h-12");
+  });
+
+  it("renders NotFoundPage with standard 404 badge, heading, description, and Back to Links action", () => {
+    render(<NotFoundPage />);
+
+    expect(screen.getByText("404 Not Found")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Page Not Found" })).toBeInTheDocument();
+    expect(
+      screen.getByText("The page you are looking for does not exist in the Redirect dashboard.")
+    ).toBeInTheDocument();
+
+    const backLink = screen.getByRole("link", { name: /back to links/i });
+    expect(backLink).toHaveAttribute("href", "/");
+    expect(screen.getByRole("button", { name: /back to links/i })).toBeInTheDocument();
+
+    const repoLink = screen.getByRole("link", { name: /redirect.*github/i });
+    expect(repoLink).toHaveAttribute("href", "https://github.com/azraftaohid/redirect");
+    expect(repoLink).toHaveAttribute("target", "_blank");
+    expect(repoLink).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("renders NotFoundCard with custom title and description for missing entities", () => {
+    render(
+      <NotFoundCard
+        title="Link Not Found"
+        description="The short link you are looking for does not exist or may have been deleted."
+      />
+    );
+
+    expect(screen.getByText("404 Not Found")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Link Not Found" })).toBeInTheDocument();
+    expect(
+      screen.getByText("The short link you are looking for does not exist or may have been deleted.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to links/i })).toHaveAttribute("href", "/");
+  });
+
+  it("hides GitHub external link on NotFoundPage when AuthProvider receives brandingExternalLinks: false", async () => {
+    const originalFetch = global.fetch;
+    localStorage.clear();
+    setStoredToken("rdir_initial_00000000000000000000000000000000");
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          principal: { kind: "initial", id: "initial", name: "Initial token" },
+          brandingExternalLinks: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    try {
+      render(
+        <AuthProvider>
+          <AuthGate>
+            <NotFoundPage />
+          </AuthGate>
+        </AuthProvider>
+      );
+
+      expect(await screen.findByRole("heading", { name: "Page Not Found" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /github/i })).not.toBeInTheDocument();
+    } finally {
+      localStorage.clear();
+      global.fetch = originalFetch;
+    }
   });
 });

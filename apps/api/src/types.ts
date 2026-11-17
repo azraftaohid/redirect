@@ -10,6 +10,7 @@ export interface Env {
   OWN_HOSTNAMES?: string;
   ANALYTICS_ENABLED?: string;
   ANALYTICS_DIMENSIONS?: string;
+  BRANDING_EXTERNAL_LINKS?: string;
 }
 
 export type PrincipalKind = "env" | "token" | "initial";

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-17
+
+### Added
+
+- **Configurable External Branding Links (`BRANDING_EXTERNAL_LINKS`):** Added the `BRANDING_EXTERNAL_LINKS` Worker runtime environment variable (enabled by default; set to `false`, `0`, `off`, `no`, or `disabled` to remove external repository links from 404 pages via `HTMLRewriter` on `404.html` and `brandingExternalLinks` in `GET /api/v1/auth/verify` while retaining the non-clickable Redirect logo/wordmark footer on `404.html`).
+
+### Changed
+
+- **Consistent 404 Pages (`404.html`, `NotFoundPage`, `LinkStatsPage`):** Redesigned the public static `404.html` page with the light-first Zinc palette, dark mode support, Redirect `/>` favicon, rounded card layout, `Unlink` icon badge, `404 Not Found` status pill, and Redirect GitHub repository footer link; aligned `NotFoundPage` and `LinkStatsPage`'s missing-link state via a shared `NotFoundCard` component and updated `ensure-assets.mjs` to copy `apps/web/404.html`.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

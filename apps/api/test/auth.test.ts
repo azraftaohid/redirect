@@ -684,4 +684,22 @@ describe("Authentication & Token Management", () => {
     const body = (await res.json()) as any;
     expect(body.error.code).toBe("rate_limited");
   });
+
+  it("reports brandingExternalLinks on /api/v1/auth/verify according to BRANDING_EXTERNAL_LINKS", async () => {
+    const resDefault = await fetchWorker(
+      "https://redirect.example.com/api/v1/auth/verify",
+      { headers: { Authorization: "Bearer admin-secret-key" } },
+      { API_KEY: "admin-secret-key" }
+    );
+    expect(resDefault.status).toBe(200);
+    expect(((await resDefault.json()) as any).brandingExternalLinks).toBe(true);
+
+    const resDisabled = await fetchWorker(
+      "https://redirect.example.com/api/v1/auth/verify",
+      { headers: { Authorization: "Bearer admin-secret-key" } },
+      { API_KEY: "admin-secret-key", BRANDING_EXTERNAL_LINKS: "false" }
+    );
+    expect(resDisabled.status).toBe(200);
+    expect(((await resDisabled.json()) as any).brandingExternalLinks).toBe(false);
+  });
 });

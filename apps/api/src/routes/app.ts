@@ -10,8 +10,17 @@ export const APP_SECURITY_HEADERS = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 } as const;
 
+const DISABLED_FLAG_VALUES = new Set(["false", "0", "off", "no", "disabled"]);
+
+export function isBrandingExternalLinksDisabled(env: Env): boolean {
+  const raw = env.BRANDING_EXTERNAL_LINKS?.trim().toLowerCase();
+  return raw !== undefined && DISABLED_FLAG_VALUES.has(raw);
+}
+
 /**
  * Returns the 404 page: body of /404.html asset with status 404.
+ * If BRANDING_EXTERNAL_LINKS is disabled, strips external repository links while keeping
+ * the non-clickable Redirect footer branding.
  * If the asset is missing, returns plain text "Not found" with status 404.
  */
 const NOT_FOUND_CSP =
@@ -29,11 +38,35 @@ export async function renderNotFound(request: Request, env: Env): Promise<Respon
         headers.set("X-Frame-Options", "DENY");
         headers.set("X-Robots-Tag", "noindex, nofollow");
         headers.set("Content-Security-Policy", NOT_FOUND_CSP);
-        return new Response(res.body, {
+
+        const disableExternalLinks = isBrandingExternalLinksDisabled(env);
+        if (disableExternalLinks) {
+          headers.delete("Content-Length");
+          headers.delete("ETag");
+        }
+
+        const response = new Response(res.body, {
           status: 404,
           statusText: "Not Found",
           headers,
         });
+
+        if (disableExternalLinks && typeof HTMLRewriter !== "undefined") {
+          return new HTMLRewriter()
+            .on("a.brand-link", {
+              element(el) {
+                el.removeAndKeepContent();
+              },
+            })
+            .on(".brand-sep, .brand-repo, .ext-icon", {
+              element(el) {
+                el.remove();
+              },
+            })
+            .transform(response);
+        }
+
+        return response;
       }
     } catch {
       // Ignore and fallback below

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +7,7 @@ const distDir = resolve(__dirname, "../../web/dist");
 const appDir = resolve(distDir, "app");
 const appIndexHtml = resolve(appDir, "index.html");
 const notFoundHtml = resolve(distDir, "404.html");
+const sourceNotFoundHtml = resolve(__dirname, "../../web/404.html");
 
 if (!existsSync(appDir)) {
   mkdirSync(appDir, { recursive: true });
@@ -35,9 +36,12 @@ if (!existsSync(appIndexHtml)) {
 }
 
 if (!existsSync(notFoundHtml)) {
-  writeFileSync(
-    notFoundHtml,
-    `<!DOCTYPE html>
+  if (existsSync(sourceNotFoundHtml)) {
+    copyFileSync(sourceNotFoundHtml, notFoundHtml);
+  } else {
+    writeFileSync(
+      notFoundHtml,
+      `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -50,6 +54,7 @@ if (!existsSync(notFoundHtml)) {
   </body>
 </html>
 `,
-    "utf8"
-  );
+      "utf8"
+    );
+  }
 }

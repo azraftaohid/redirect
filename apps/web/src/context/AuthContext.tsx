@@ -23,6 +23,7 @@ export interface AuthContextValue {
   status: AuthStatus;
   token: string | null;
   principal: AuthPrincipal | null;
+  brandingExternalLinks: boolean;
   accessExpired: boolean;
   warning: string | null;
   login: (token: string) => Promise<void>;
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [token, setToken] = useState<string | null>(() => getStoredToken());
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
+  const [brandingExternalLinks, setBrandingExternalLinks] = useState(true);
   const [accessExpired, setAccessExpired] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
 
@@ -100,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         const res = await verifyAuth(token);
         if (!cancelled) {
           setPrincipal(res.principal);
+          setBrandingExternalLinks(res.brandingExternalLinks ?? true);
           setStatus("authenticated");
           setWarning(null);
         }
@@ -157,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     setStoredToken(trimmed);
     setToken(trimmed);
     setPrincipal(res.principal);
+    setBrandingExternalLinks(res.brandingExternalLinks ?? true);
     setStatus("authenticated");
     setWarning(null);
     setAccessExpired(false);
@@ -184,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     status,
     token,
     principal,
+    brandingExternalLinks,
     accessExpired,
     warning,
     login,
@@ -201,4 +206,9 @@ export function useAuth(): AuthContextValue {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
+}
+
+export function useBrandingExternalLinks(): boolean {
+  const context = useContext(AuthContext);
+  return context?.brandingExternalLinks ?? true;
 }

@@ -1,6 +1,6 @@
 # Redirect
 
-A lightweight URL shortener and link management platform built on Cloudflare Workers with low D1 write overhead (`v0.3.0` — see [CHANGELOG.md](CHANGELOG.md)).
+A lightweight URL shortener and link management platform built on Cloudflare Workers with low D1 write overhead (`v0.3.1` — see [CHANGELOG.md](CHANGELOG.md)).
 
 Deployed as a single Cloudflare Worker with Static Assets, Redirect pairs sub-second D1-backed edge redirection with a token-authenticated REST API (`/api/v1/*`) and a React management console (`/app/`).
 
@@ -97,6 +97,7 @@ Configure optional variables and secrets in **Workers & Pages → `redirect` →
 | `OWN_HOSTNAMES` | Unset | Comma-separated additional hostnames pointing to this Worker (e.g., `www.go.example.com`) blocked by loop prevention. |
 | `ANALYTICS_ENABLED` | `"true"` | Set to `false` (`0`, `off`, `no`) to stop D1 click writes immediately without redeploying. |
 | `ANALYTICS_DIMENSIONS` | Unset | Comma-separated optional dimensions (`country`, `referrer`) recorded to `link_daily_dims`. |
+| `BRANDING_EXTERNAL_LINKS` | `"true"` | Set to `false` (`0`, `off`, `no`, `disabled`) to remove external links (e.g., the GitHub repository link) from 404 pages while keeping the non-clickable Redirect branding on `404.html`. |
 | `INITIAL_TOKEN` | Enabled | Set to `"disabled"` (case-insensitive) to disable `initial_token` bootstrapping and auth while keeping custom `token:*` keys active. |
 | `API_KEY` *(Secret)* | Unset | Set via `wrangler secret put API_KEY` to enter **strict lockdown mode** (only `API_KEY` is accepted; all KV tokens return `401`). |
 

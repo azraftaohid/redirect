@@ -159,6 +159,7 @@ describe("Request Dispatcher & App Serving", () => {
     );
     const body = await res.text();
     expect(body).toContain("404 Not Found");
+    expect(body).toContain("https://github.com/azraftaohid/redirect");
     expect(body).not.toContain("/app");
   });
 
@@ -176,5 +177,34 @@ describe("Request Dispatcher & App Serving", () => {
     expect(resRedirect.status).toBe(308);
     expect(resRedirect.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(resRedirect.headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+
+  it("removes external GitHub link from 404 page when BRANDING_EXTERNAL_LINKS is disabled while keeping Redirect branding", async () => {
+    for (const flag of ["false", "0", "off", "no", "disabled", " FALSE "]) {
+      const res = await fetchWorker(
+        "https://redirect.example.com/unknown-dead-link",
+        undefined,
+        { BRANDING_EXTERNAL_LINKS: flag }
+      );
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(body).toContain("404 Not Found");
+      expect(body).toContain('<div class="brand">');
+      expect(body).toContain("<span>Redirect</span>");
+      expect(body).toContain('<svg class="logo"');
+      expect(body).not.toContain("https://github.com/azraftaohid/redirect");
+      expect(body).not.toContain("<a");
+      expect(body).not.toContain("GitHub");
+      expect(body).not.toContain('class="ext-icon"');
+    }
+
+    const resEnabled = await fetchWorker(
+      "https://redirect.example.com/unknown-dead-link",
+      undefined,
+      { BRANDING_EXTERNAL_LINKS: "true" }
+    );
+    expect(resEnabled.status).toBe(404);
+    const enabledBody = await resEnabled.text();
+    expect(enabledBody).toContain("https://github.com/azraftaohid/redirect");
   });
 });

@@ -11,6 +11,7 @@ import {
   type StoredTokenMetadata,
 } from "../auth/tokens.js";
 import { logAuditEvent } from "../utils/audit.js";
+import { isBrandingExternalLinksDisabled } from "./app.js";
 
 export const tokensRouter = new Hono<AppContext>();
 
@@ -33,7 +34,14 @@ const requireTokenAdmin: MiddlewareHandler<AppContext> = async (c, next) => {
 // GET /api/v1/auth/verify
 tokensRouter.get("/auth/verify", (c) => {
   const principal = c.get("principal");
-  return c.json({ principal }, 200, { "Cache-Control": "no-store" });
+  return c.json(
+    {
+      principal,
+      brandingExternalLinks: !isBrandingExternalLinksDisabled(c.env),
+    },
+    200,
+    { "Cache-Control": "no-store" }
+  );
 });
 
 // GET /api/v1/tokens

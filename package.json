@@ -1,7 +1,7 @@
 {
   "name": "redirect",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Simple, lightweight URL redirection platform on Cloudflare Workers & D1",
   "packageManager": "pnpm@12.16.1",
   "scripts": {

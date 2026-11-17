@@ -6,6 +6,7 @@ import { zeroFillDailySeries, formatCountryName } from "@/utils/stats";
 import { formatDisplayDate, isLinkExpired } from "@/utils/dates";
 import { DailyChart } from "@/components/DailyChart";
 import { LinkFormModal } from "@/components/LinkFormModal";
+import { NotFoundCard } from "@/pages/NotFoundPage";
 
 const QrCodeModal = React.lazy(() =>
   import("@/components/QrCodeModal").then((m) => ({ default: m.QrCodeModal }))
@@ -27,7 +28,6 @@ import {
   Clock,
   MousePointerClick,
   Activity,
-  AlertCircle,
   Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -98,19 +98,11 @@ export function LinkStatsPage(): React.ReactElement {
 
   if (!link) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-        <AlertCircle className="w-12 h-12 text-zinc-400" />
-        <h2 className="text-lg font-bold">Link Not Found</h2>
-        <p className="text-sm text-zinc-500 max-w-sm">
-          The short link you are looking for does not exist or may have been deleted.
-        </p>
-        <Link href="/">
-          <Button size="sm" variant="outline" className="gap-2">
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Links</span>
-          </Button>
-        </Link>
-      </div>
+      <NotFoundCard
+        title="Link Not Found"
+        description="The short link you are looking for does not exist or may have been deleted."
+        className="my-8 sm:my-12"
+      />
     );
   }
 
